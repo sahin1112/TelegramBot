@@ -79,18 +79,34 @@ public sealed class ContentItem : Entity
 
     // ---- Durum geçişleri (kurallar burada; kör setter yok) ----
 
-    public Result Approve(string approverRef, IClock clock)
+    /// <summary>
+    /// Onaylar. <paramref name="automated"/>=true (otomatik/RssAutoApprove) ise yüksek riskli içerik
+    /// REDDEDİLİR — her zaman insan onayı gerekir (00 §10). İnsan onayı (automated=false) risk ne olursa olsun geçer.
+    /// </summary>
+    public Result Approve(string approverRef, bool automated, IClock clock)
     {
-        if (RiskLevel == RiskLevel.High && CreatedByType == ActorType.System)
-            return Result.Failure(ContentPlatform.SharedKernel.Error.Validation("Yüksek riskli içerik otomatik onaylanamaz."));
+        if (RiskLevel == RiskLevel.High && automated)
+            return Result.Failure(ContentPlatform.SharedKernel.Error.Validation("Yüksek riskli içerik otomatik onaylanamaz; insan onayı gerekir."));
         if (EditorialStatus is not (EditorialStatus.PendingReview or EditorialStatus.Draft))
             return Result.Failure(ContentPlatform.SharedKernel.Error.Conflict($"Onay için uygun durumda değil: {EditorialStatus}."));
 
         ApprovedByRef = approverRef;
         ApprovedAt = clock.UtcNow;
         EditorialStatus = EditorialStatus.Approved;
+        Error = null; // varsa önceki inceleme/kalite notunu temizle
         Touch(clock);
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Kalite kapısı kritik sorun bulunca içeriği İNSAN incelemesine geri alır (00 §27-B):
+    /// oto-yeniden-üretime değil, Draft'a düşer; sebep saklanır. Üretim sorgusu (Approved+Pending) bunu tekrar almaz.
+    /// </summary>
+    public void HoldForReview(string reason, IClock clock)
+    {
+        EditorialStatus = EditorialStatus.Draft;
+        Error = reason;
+        Touch(clock);
     }
 
     public Result Reject(string actorRef, IClock clock)

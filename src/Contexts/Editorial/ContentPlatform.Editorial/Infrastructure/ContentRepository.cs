@@ -7,7 +7,7 @@ namespace ContentPlatform.Editorial.Infrastructure;
 internal sealed class ContentRepository(EditorialDbContext db) : IContentRepository
 {
     public Task<ContentItem?> GetAsync(Guid id, CancellationToken ct) =>
-        db.ContentItems.Include(x => x.Revisions).FirstOrDefaultAsync(x => x.Id == id, ct);
+        db.ContentItems.Include(x => x.Revisions).Include(x => x.Media).FirstOrDefaultAsync(x => x.Id == id, ct);
 
     public Task<bool> ExistsByHashAsync(string sourceHash, CancellationToken ct) =>
         db.ContentItems.AnyAsync(x => x.SourceHash == sourceHash, ct);

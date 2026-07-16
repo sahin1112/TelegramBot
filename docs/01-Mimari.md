@@ -26,7 +26,7 @@ Api/              → Minimal API endpoint'leri
 ```
 
 ## 2. Teknoloji yığını
-`.NET 10 (LTS, destek ~2028)` · ASP.NET Core Minimal API · EF Core 10 · **PostgreSQL** (JSONB) · **Redis** (kuyruk/sayaç/rate-limit) · **Quartz.NET** · **SkiaSharp** (kart render) · OpenAI (metin+görsel, konfigüre `ModelCatalog`) · **HtmlSanitizer** · **ASP.NET Data Protection/KMS** (token şifreleme) · Admin **SPA** (`wwwroot/admin`) · Blog **SSR** (Razor/MVC veya Next.js) · **Object storage (S3)+CDN** · **OpenTelemetry**. Merkezi paket sürümü: `Directory.Packages.props`.
+`.NET 9 (net9.0)` · ASP.NET Core Minimal API · EF Core 9 · **SQL Server 2022** · **Redis** (kuyruk/sayaç/rate-limit) · **Quartz.NET** · **SkiaSharp** (kart render) · OpenAI (metin+görsel, konfigüre `ModelCatalog`) · **HtmlSanitizer** · **ASP.NET Data Protection/KMS** (token şifreleme) · Admin **SPA** (`wwwroot/admin`) · Blog **SSR** (Razor/MVC veya Next.js) · **Object storage (S3)+CDN** · **OpenTelemetry**. Merkezi paket sürümü: `Directory.Packages.props`.
 
 ## 3. Klasör yapısı
 ```

@@ -17,7 +17,7 @@ public sealed class PlatformModule : IModule
     public void Register(IServiceCollection services, IConfiguration configuration)
     {
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
 
         services.AddDbContext<PlatformDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", PlatformDbContext.Schema)));

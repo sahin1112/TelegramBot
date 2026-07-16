@@ -4,13 +4,13 @@ using ContentPlatform.SharedKernel;
 namespace ContentPlatform.Editorial.Application;
 
 /// <summary>Panelden manuel içerik ekleme — AI'lı (taslak ürettir) ve AI'sız (bitmiş metin).</summary>
-public sealed class ManualContentService(IContentRepository repository, IClock clock)
+public sealed class ManualContentService(IContentRepository repository, IRiskClassifier riskClassifier, IClock clock)
 {
     /// <summary>AI'lı: metni yapıştır → otomatik onaylı → PipelineDrainJob AI ile üretir.</summary>
     public async Task<Guid> AddWithAiAsync(AddManualAiRequest req, CancellationToken ct)
     {
         var item = new ContentItem(
-            ContentOrigin.Manual, useAi: true, req.ImageSource, RiskLevel.Low,
+            ContentOrigin.Manual, useAi: true, req.ImageSource, riskClassifier.Classify(req.Title, req.RawInput),
             req.CategoryId, req.TestMode, NewHash(), sourceUrl: null,
             rawTitle: req.Title, rawInput: req.RawInput,
             ActorType.AdminUser, createdByRef: "admin", clock);
@@ -24,7 +24,7 @@ public sealed class ManualContentService(IContentRepository repository, IClock c
     public async Task<Guid> AddWithoutAiAsync(AddManualNoAiRequest req, CancellationToken ct)
     {
         var item = new ContentItem(
-            ContentOrigin.ManualNoAi, useAi: false, req.ImageSource, RiskLevel.Low,
+            ContentOrigin.ManualNoAi, useAi: false, req.ImageSource, riskClassifier.Classify(req.Title, req.BodyHtml),
             req.CategoryId, req.TestMode, NewHash(), sourceUrl: null,
             rawTitle: req.Title, rawInput: req.BodyHtml,
             ActorType.AdminUser, createdByRef: "admin", clock);

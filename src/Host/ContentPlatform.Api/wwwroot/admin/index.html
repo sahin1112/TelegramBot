@@ -181,6 +181,7 @@ const statusChip = s => {
   const map={Published:'ok',Approved:'ok',ReadyToPublish:'ok',PendingReview:'warn',Draft:'warn',Failed:'dng',Rejected:'dng',Archived:'mut',Pending:'warn',Scheduled:'test',Skipped:'mut'};
   return `<span class="chip ${map[s]||'mut'}">${h(s)}</span>`;
 };
+const riskBadge = r => r==='High' ? '<span class="chip dng">Yüksek risk</span>' : (r==='Medium' ? '<span class="chip warn">Orta risk</span>' : '');
 
 /* ---------------- Router ---------------- */
 const routes = {
@@ -249,7 +250,7 @@ async function renderQueue(){
   const rows = items.map(i=>`
     <tr data-id="${i.id}">
       <td><input type="checkbox" class="q-sel" value="${i.id}"></td>
-      <td><a href="#" class="q-prev">${h(i.title||'(başlıksız)')}</a><div class="muted" style="font-size:12px">${h(i.origin)}</div></td>
+      <td><a href="#" class="q-prev">${h(i.title||'(başlıksız)')}</a> ${riskBadge(i.riskLevel)}<div class="muted" style="font-size:12px">${h(i.origin)}</div></td>
       <td><select class="q-img">
         <option value="SkiaCard">SkiaCard (başlık kartı)</option>
         <option value="Ai">AI görsel</option>
@@ -304,7 +305,8 @@ async function showDetail(id){
   openModal(`
     <span class="x" onclick="closeModal()">×</span>
     <h2>${h(d.title||'(başlıksız)')}</h2>
-    <div class="muted" style="margin-bottom:10px">${statusChip(d.editorialStatus)} · medya: ${h(d.mediaStatus)} · görsel: ${h(d.imageSource)} · kategori: ${h(catName(cl,d.categoryId))}${d.scheduledAt?` · planlı: ${new Date(d.scheduledAt).toLocaleString('tr')}`:''} ${d.testMode?'· <span class=\"chip test\">TEST</span>':''}</div>
+    <div class="muted" style="margin-bottom:10px">${statusChip(d.editorialStatus)} ${riskBadge(d.riskLevel)} · medya: ${h(d.mediaStatus)} · görsel: ${h(d.imageSource)} · kategori: ${h(catName(cl,d.categoryId))}${d.scheduledAt?` · planlı: ${new Date(d.scheduledAt).toLocaleString('tr')}`:''} ${d.testMode?'· <span class=\"chip test\">TEST</span>':''}</div>
+    ${d.holdReason?`<div class="chip dng" style="display:block;margin-bottom:10px">İncelemeye alındı — ${h(d.holdReason)}</div>`:''}
     <div class="tabs"><button class="active" data-t="edit">Düzenle</button><button data-t="prev">Önizleme</button><button data-t="pub">Yayınlar (${pubs.length})</button></div>
     <div id="tab-edit">
       <label>Başlık</label><input id="e-title" type="text" value="${h(d.title)}">
@@ -314,6 +316,7 @@ async function showDetail(id){
       <label>Etiketler (virgülle)</label><input id="e-tags" type="text" value="${h((d.tags||[]).join(', '))}">
       <div class="row" style="margin-top:14px">
         <button class="btn pri" id="e-save">Kaydet (yeni revizyon)</button>
+        ${d.mediaStatus==='Ready'&&d.editorialStatus!=='Published'?'<button class="btn" id="e-publish">Yayınla</button>':''}
         <label class="row" style="margin:0"><input type="checkbox" id="e-test" ${d.testMode?'checked':''} style="width:auto"> Test modu</label>
         <button class="btn dng right" id="e-retract">Geri çek</button>
       </div>
@@ -337,6 +340,7 @@ async function showDetail(id){
       primaryKeyword:null, imageAltText:null };
     try{ await api(`/editorial/${id}/revision`,{method:'PUT',body}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);}
   };
+  const pubBtn=$('#e-publish'); if(pubBtn) pubBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/publish`,{method:'POST'}); toast('Yayına gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
   $('#e-test').onchange=async(ev)=>{ try{ await api(`/editorial/${id}/testmode`,{method:'POST',body:{enabled:ev.target.checked}}); toast('Test modu güncellendi'); }catch(e){toast(e.message,true);} };
   $('#e-retract').onclick=async()=>{ if(!confirm('Geri çekilsin mi?'))return; try{ await api(`/editorial/${id}/retract`,{method:'POST'}); toast('Geri çekildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
 }

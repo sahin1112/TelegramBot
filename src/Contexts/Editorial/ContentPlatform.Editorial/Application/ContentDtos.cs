@@ -26,7 +26,8 @@ public sealed record ContentDetailDto(
     Guid Id, ContentOrigin Origin, EditorialStatus EditorialStatus, MediaStatus MediaStatus,
     RiskLevel RiskLevel, ImageSource ImageSource, bool TestMode, Guid? CategoryId,
     string? Title, string? ShortX, string? BodyHtml, string? InstagramCaption,
-    IReadOnlyList<string> Tags, string? MediaUrl, DateTimeOffset CreatedAt, DateTimeOffset? ScheduledAt, DateTimeOffset? PublishedAt);
+    IReadOnlyList<string> Tags, string? MediaUrl, DateTimeOffset CreatedAt, DateTimeOffset? ScheduledAt, DateTimeOffset? PublishedAt,
+    string? HoldReason);
 
 public sealed record PagedContentDto(IReadOnlyList<ContentSummaryDto> Items, int Page, int Size, int Total);
 

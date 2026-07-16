@@ -43,10 +43,17 @@ internal static class EditorialEndpoints
             if (req?.ImageSource is { } src) item.SetImageSource(src, clock);
             if (req?.TestMode is { } tm) item.SetTestMode(tm, clock);
             item.Schedule(req?.ScheduledAt, clock); // null → kategori politikası / hemen
-            var r = item.Approve("admin", clock);
+            var r = item.Approve("admin", automated: false, clock); // panelden = insan onayı
             if (r.IsFailure) return Results.Conflict(r.Error);
             await repo.SaveChangesAsync(ct);
             return Results.Ok();
+        });
+
+        // ---- Yayınla (kalite kapısında tutulan / hazır içeriği elle yayına gönder) ----
+        g.MapPost("/{id:guid}/publish", async (Guid id, ContentGenerationService gen, CancellationToken ct) =>
+        {
+            var r = await gen.PublishExistingAsync(id, ct);
+            return r.IsSuccess ? Results.Ok() : Results.Conflict(r.Error);
         });
 
         // ---- Reddet (0 maliyet) ----
@@ -67,7 +74,7 @@ internal static class EditorialEndpoints
             foreach (var id in req.Ids)
             {
                 var item = await repo.GetAsync(id, ct);
-                if (item is not null && item.Approve("admin", clock).IsSuccess) ok++;
+                if (item is not null && item.Approve("admin", automated: false, clock).IsSuccess) ok++;
             }
             await repo.SaveChangesAsync(ct);
             return Results.Ok(new { approved = ok, total = req.Ids.Count });
@@ -143,6 +150,6 @@ internal static class EditorialEndpoints
         return new ContentDetailDto(
             i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, i.ImageSource, i.TestMode, i.CategoryId,
             rev?.Title ?? i.RawTitle, rev?.ShortX, rev?.BodyHtml, rev?.InstagramCaption,
-            rev?.Tags ?? new List<string>(), media?.Url, i.CreatedAt, i.ScheduledAt, i.PublishedAt);
+            rev?.Tags ?? new List<string>(), media?.Url, i.CreatedAt, i.ScheduledAt, i.PublishedAt, i.Error);
     }
 }

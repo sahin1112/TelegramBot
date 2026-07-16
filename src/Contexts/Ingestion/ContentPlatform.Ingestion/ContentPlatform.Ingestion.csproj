@@ -18,5 +18,6 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="AngleSharp" />
   </ItemGroup>
 </Project>

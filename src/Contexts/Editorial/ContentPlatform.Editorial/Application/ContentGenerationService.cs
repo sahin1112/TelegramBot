@@ -4,6 +4,7 @@ using ContentPlatform.Editorial.Contracts;
 using ContentPlatform.Editorial.Domain;
 using ContentPlatform.SharedKernel;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ContentPlatform.Editorial.Application;
 
@@ -21,7 +22,9 @@ public sealed class ContentGenerationService(
     ICardRenderer cardRenderer,
     IMediaStore mediaStore,
     IIntegrationEventPublisher bus,
+    IQualityGate qualityGate,
     IClock clock,
+    IOptions<SiteOptions> siteOptions,
     ILogger<ContentGenerationService> logger)
 {
     private const int CardW = 1200, CardH = 675;
@@ -73,7 +76,7 @@ public sealed class ContentGenerationService(
                 item.MarkMediaReady(clock);
                 await repository.SaveChangesAsync(ct);
 
-                await PublishReadyAsync(item, f, url, ct);
+                await MaybePublishAsync(item, f, url, ct);
                 produced++;
             }
             catch (Exception ex)
@@ -101,7 +104,7 @@ public sealed class ContentGenerationService(
 
         var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
         if (rev is not null)
-            await PublishReadyAsync(item,
+            await MaybePublishAsync(item,
                 new Fields(rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags, rev.PrimaryKeyword, rev.ImageAltText),
                 url, ct);
         return Result.Success();
@@ -129,11 +132,51 @@ public sealed class ContentGenerationService(
         return (url, MediaKind.SkiaCard, CardW, CardH);
     }
 
-    private Task PublishReadyAsync(ContentItem item, Fields f, string? mediaUrl, CancellationToken ct) =>
-        bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
+    /// <summary>Kalite kapısı: kritik sorun varsa içeriği incelemeye alır (yayınlamaz); yoksa yayına-hazır olayı.</summary>
+    private async Task MaybePublishAsync(ContentItem item, Fields f, string? mediaUrl, CancellationToken ct)
+    {
+        if (item.UseAi)
+        {
+            var q = qualityGate.Evaluate(f.Title, f.ShortX, f.BodyHtml, f.Tags.ToList());
+            if (q.Critical)
+            {
+                item.HoldForReview("Kalite kapısı: " + string.Join(" ", q.Issues), clock);
+                await repository.SaveChangesAsync(ct);
+                logger.LogInformation("İçerik kalite kapısında tutuldu (incelemeye): {Id} — {Issues}", item.Id, string.Join(" ", q.Issues));
+                return;
+            }
+        }
+        await PublishReadyAsync(item, f, mediaUrl, ct);
+    }
+
+    /// <summary>Admin override: tutulmuş/hazır bir içeriği elle yayına gönderir (kalite kapısını atlar).</summary>
+    public async Task<Result> PublishExistingAsync(Guid contentItemId, CancellationToken ct)
+    {
+        var item = await repository.GetAsync(contentItemId, ct);
+        if (item is null) return Result.Failure(Error.NotFound("İçerik"));
+        var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
+        if (rev is null) return Result.Failure(Error.Conflict("Yayınlanacak güncel revizyon yok."));
+        if (item.MediaStatus != MediaStatus.Ready) return Result.Failure(Error.Conflict("Görsel hazır değil (önce üretim/yükleme)."));
+        var mediaUrl = item.Media.LastOrDefault()?.Url;
+        await PublishReadyAsync(item,
+            new Fields(rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags, rev.PrimaryKeyword, rev.ImageAltText),
+            mediaUrl, ct);
+        return Result.Success();
+    }
+
+    private Task PublishReadyAsync(ContentItem item, Fields f, string? mediaUrl, CancellationToken ct)
+    {
+        // Blog linki: test içeriği bloglanmaz → linksiz. Aksi halde Site ile AYNI slug formülü (BlogSlug).
+        string? link = null;
+        var baseUrl = siteOptions.Value.BaseUrlTrimmed;
+        if (!item.TestMode && baseUrl.Length > 0)
+            link = $"{baseUrl}/blog/{BlogSlug.Build(item.Id, f.PrimaryKeyword, f.Title)}";
+
+        return bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
             Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, item.TestMode,
-            f.Title, f.ShortX, f.BodyHtml, f.InstagramCaption, f.Tags.ToList(), mediaUrl, Link: null,
-            ScheduledAt: item.ScheduledAt), ct);
+            f.Title, f.ShortX, f.BodyHtml, f.InstagramCaption, f.Tags.ToList(), f.PrimaryKeyword, mediaUrl,
+            Link: link, ScheduledAt: item.ScheduledAt), ct);
+    }
 
     private static Fields ParseFields(string json, string fallbackTitle)
     {

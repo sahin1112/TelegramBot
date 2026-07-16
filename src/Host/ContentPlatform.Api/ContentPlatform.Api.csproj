@@ -6,6 +6,10 @@
   <ItemGroup>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- EF Core Tools (dotnet ef) başlangıç projesinde Design paketini arar -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\ContentPlatform.SharedKernel\ContentPlatform.SharedKernel.csproj" />

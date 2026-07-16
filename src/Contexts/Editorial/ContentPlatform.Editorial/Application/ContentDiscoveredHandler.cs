@@ -12,6 +12,7 @@ namespace ContentPlatform.Editorial.Application;
 /// </summary>
 public sealed class ContentDiscoveredHandler(
     IContentRepository repository,
+    IRiskClassifier riskClassifier,
     IClock clock,
     ILogger<ContentDiscoveredHandler> logger)
     : IIntegrationEventHandler<ContentDiscoveredIntegrationEvent>
@@ -21,12 +22,13 @@ public sealed class ContentDiscoveredHandler(
         if (await repository.ExistsByHashAsync(e.SourceHash, ct)) return; // ikinci güvenlik
 
         var origin = Enum.TryParse<ContentOrigin>(e.SourceKind, out var o) ? o : ContentOrigin.Rss;
+        var risk = riskClassifier.Classify(e.RawTitle, e.RawInput);
 
         var item = new ContentItem(
             origin: origin,
             useAi: true,
             imageSource: ImageSource.SkiaCard,   // varsayılan; onay ekranında değişebilir
-            riskLevel: RiskLevel.Low,            // gerçek sınıflandırma sonraki adımda
+            riskLevel: risk,                     // metinden sınıflandırıldı (yüksek risk oto-onaylanamaz)
             categoryId: e.CategoryId,
             testMode: false,
             sourceHash: e.SourceHash,

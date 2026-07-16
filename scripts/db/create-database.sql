@@ -10,7 +10,7 @@ IF DB_ID(N'ContentPlatform') IS NULL
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'contentplatform')
-    CREATE LOGIN [contentplatform] WITH PASSWORD = N'REPLACE_ON_SERVER', CHECK_POLICY = ON;
+    CREATE LOGIN [contentplatform] WITH PASSWORD = N'3uYg6EQIN5RfIlQD!1', CHECK_POLICY = ON;
 GO
 
 USE [ContentPlatform];

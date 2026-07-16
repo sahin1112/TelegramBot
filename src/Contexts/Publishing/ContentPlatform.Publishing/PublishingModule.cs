@@ -22,7 +22,7 @@ public sealed class PublishingModule : IModule
         services.Configure<OpenAiOptions>(configuration.GetSection("OpenAI"));
 
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
         services.AddDbContext<PublishingDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", PublishingDbContext.Schema)));
         services.AddScoped<IStartupMigrator, PublishingMigrator>();

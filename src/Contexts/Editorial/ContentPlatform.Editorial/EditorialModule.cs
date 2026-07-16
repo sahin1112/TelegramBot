@@ -20,17 +20,20 @@ public sealed class EditorialModule : IModule
     public void Register(IServiceCollection services, IConfiguration configuration)
     {
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
 
         services.AddDbContext<EditorialDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", EditorialDbContext.Schema)));
         services.AddScoped<IStartupMigrator, EditorialMigrator>();
 
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
+        services.Configure<ContentPlatform.Abstractions.SiteOptions>(configuration.GetSection("Site"));
         services.AddSingleton<ICardRenderer, SkiaCardRenderer>();
         services.AddScoped<LocalMediaStore>();
         services.AddScoped<IMediaStore>(sp => sp.GetRequiredService<LocalMediaStore>());
         services.AddScoped<IMediaReader>(sp => sp.GetRequiredService<LocalMediaStore>());
+        services.AddSingleton<IRiskClassifier, KeywordRiskClassifier>();
+        services.AddSingleton<IQualityGate, ContentQualityGate>();
         services.AddScoped<IContentRepository, ContentRepository>();
         services.AddScoped<IIntegrationEventHandler<ContentDiscoveredIntegrationEvent>, ContentDiscoveredHandler>();
         services.AddScoped<ContentGenerationService>();

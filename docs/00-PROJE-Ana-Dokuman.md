@@ -59,7 +59,7 @@ Sistem teknik olarak beş şeyi birden yapabilir (haber sitesi, sosyal otomasyon
 ---
 
 ## 2. Teknoloji
-`.NET 10 (LTS, destek 2028’e dek)`, ASP.NET Core Minimal API, EF Core 10, **PostgreSQL** (JSONB), **Redis** (kuyruk/sayaç/rate-limit), **Quartz.NET**, **SkiaSharp** (kart) + OpenAI Images (düşük kalite), OpenAI metin (konfigüre model), **HtmlSanitizer** (yorum + içe aktarılan + AI HTML), **Data Protection/KMS** (token şifreleme), Admin **SPA** (`wwwroot/admin`), Blog **SSR** (Razor/MVC veya Next.js), **Object storage (S3)+CDN** (görseller), **OpenTelemetry** (izleme).
+`.NET 9 (net9.0)`, ASP.NET Core Minimal API, EF Core 9, **SQL Server 2022**, **Redis** (kuyruk/sayaç/rate-limit), **Quartz.NET**, **SkiaSharp** (kart) + OpenAI Images (düşük kalite), OpenAI metin (konfigüre model), **HtmlSanitizer** (yorum + içe aktarılan + AI HTML), **Data Protection/KMS** (token şifreleme), Admin **SPA** (`wwwroot/admin`), Blog **SSR** (Razor/MVC veya Next.js), **Object storage (S3)+CDN** (görseller), **OpenTelemetry** (izleme).
 Devralınan: `XApiClient` (OAuth 1.0a), IG/Threads adaptörleri, Telegram broadcasting + `BroadcastGuard`, `Community` kart/liderlik, `SystemSetting`/admin deseni, `Ads`/`Campaign` iskeleti.
 
 ---

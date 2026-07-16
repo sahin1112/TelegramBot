@@ -14,6 +14,7 @@ public sealed record ContentReadyToPublishIntegrationEvent(
     string BodyHtml,
     string? InstagramCaption,
     IReadOnlyList<string> Tags,
+    string? PrimaryKeyword,
     string? MediaUrl,
     string? Link,
     DateTimeOffset? ScheduledAt) : IIntegrationEvent;
