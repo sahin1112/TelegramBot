@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <RootNamespace>ContentPlatform.Worker</RootNamespace>
+    <AssemblyName>ContentPlatform.Worker</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Quartz" />
+    <PackageReference Include="Quartz.Extensions.Hosting" />
+    <PackageReference Include="Serilog.AspNetCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\ContentPlatform.SharedKernel\ContentPlatform.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Shared\ContentPlatform.Abstractions\ContentPlatform.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Contexts\Ingestion\ContentPlatform.Ingestion\ContentPlatform.Ingestion.csproj" />
+    <ProjectReference Include="..\..\Contexts\Editorial\ContentPlatform.Editorial\ContentPlatform.Editorial.csproj" />
+    <ProjectReference Include="..\..\Contexts\Publishing\ContentPlatform.Publishing\ContentPlatform.Publishing.csproj" />
+    <ProjectReference Include="..\..\Contexts\Site\ContentPlatform.Site\ContentPlatform.Site.csproj" />
+    <ProjectReference Include="..\..\Contexts\Platform\ContentPlatform.Platform\ContentPlatform.Platform.csproj" />
+  </ItemGroup>
+</Project>

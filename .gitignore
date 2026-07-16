@@ -1,0 +1,15 @@
+## .NET
+bin/
+obj/
+*.user
+artifacts/
+.vs/
+[Bb]uild/
+TestResults/
+*.received.*
+## Rider/VSCode
+.idea/
+.vscode/
+## Local
+appsettings.*.local.json
+*.env

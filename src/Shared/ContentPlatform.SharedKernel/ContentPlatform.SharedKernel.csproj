@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ContentPlatform.SharedKernel</RootNamespace>
+    <AssemblyName>ContentPlatform.SharedKernel</AssemblyName>
+  </PropertyGroup>
+</Project>

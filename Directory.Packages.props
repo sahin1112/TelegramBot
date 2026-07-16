@@ -1,0 +1,26 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- EF Core + PostgreSQL -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
+    <!-- Zamanlama -->
+    <PackageVersion Include="Quartz" Version="3.13.1" />
+    <PackageVersion Include="Quartz.Extensions.Hosting" Version="3.13.1" />
+    <!-- Cache / Redis -->
+    <PackageVersion Include="StackExchange.Redis" Version="2.8.16" />
+    <!-- Loglama -->
+    <PackageVersion Include="Serilog.AspNetCore" Version="9.0.0" />
+    <!-- Görsel -->
+    <PackageVersion Include="SkiaSharp" Version="3.116.1" />
+    <!-- HTML sanitizasyon -->
+    <PackageVersion Include="HtmlSanitizer" Version="9.0.884" />
+    <!-- OpenAPI (net9) -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="9.0.0" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ContentPlatform.Site</RootNamespace>
+    <AssemblyName>ContentPlatform.Site</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Shared\ContentPlatform.SharedKernel\ContentPlatform.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\Shared\ContentPlatform.Abstractions\ContentPlatform.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

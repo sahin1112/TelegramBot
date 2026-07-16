@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>İçerik Paneli</title>
+<style>
+:root{
+  --bg:#0f1420; --panel:#171d2b; --panel2:#1e2637; --border:#273246; --text:#e6ebf5;
+  --muted:#8a95a8; --accent:#2ec5b6; --accent2:#3a86ff; --danger:#ef5b6b; --warn:#e6a23c;
+  --ok:#3fb37f; --radius:12px;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+a{color:var(--accent)}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+/* Sidebar */
+.side{background:var(--panel);border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{font-weight:700;font-size:16px;padding:6px 10px 16px;color:#fff;letter-spacing:.3px}
+.brand small{display:block;color:var(--muted);font-weight:400;font-size:11px;margin-top:2px}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--muted);text-decoration:none;margin-bottom:2px}
+.nav a:hover{background:var(--panel2);color:var(--text)}
+.nav a.active{background:linear-gradient(90deg,rgba(46,197,182,.18),transparent);color:#fff;box-shadow:inset 2px 0 0 var(--accent)}
+.nav .ic{width:18px;text-align:center;opacity:.9}
+/* Main */
+.main{padding:22px 26px;max-width:1200px}
+.head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.head h1{font-size:20px;margin:0}
+.head .sub{color:var(--muted);font-size:12px}
+/* Cards / tables */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.grid{display:grid;gap:14px}
+.grid.k4{grid-template-columns:repeat(4,1fr)}
+.grid.k3{grid-template-columns:repeat(3,1fr)}
+.grid.k2{grid-template-columns:repeat(2,1fr)}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.stat .v{font-size:26px;font-weight:700;color:#fff}
+.stat .l{color:var(--muted);font-size:12px;margin-top:4px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+tr:hover td{background:rgba(255,255,255,.02)}
+/* Controls */
+button,select,input,textarea{font:inherit;color:var(--text)}
+.btn{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:9px;cursor:pointer}
+.btn:hover{border-color:#3a465f}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#04201d;font-weight:600}
+.btn.pri:hover{filter:brightness(1.06)}
+.btn.dng{background:transparent;border-color:var(--danger);color:var(--danger)}
+.btn.dng:hover{background:rgba(239,91,107,.12)}
+.btn.sm{padding:5px 9px;font-size:12px;border-radius:7px}
+.btn.gho{background:transparent}
+select,input[type=text],input[type=number],input[type=password],input[type=datetime-local],textarea{
+  background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:9px 11px;width:100%;outline:none}
+input[type=datetime-local]{color-scheme:dark}
+select:focus,input:focus,textarea:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:90px;line-height:1.5;white-space:pre-wrap}
+label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.right{margin-left:auto}
+.chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid var(--border)}
+.chip.ok{color:var(--ok);border-color:rgba(63,179,127,.4);background:rgba(63,179,127,.1)}
+.chip.warn{color:var(--warn);border-color:rgba(230,162,60,.4);background:rgba(230,162,60,.1)}
+.chip.dng{color:var(--danger);border-color:rgba(239,91,107,.4);background:rgba(239,91,107,.1)}
+.chip.mut{color:var(--muted)}
+.chip.test{color:#c9a3ff;border-color:rgba(158,110,255,.4);background:rgba(158,110,255,.12)}
+/* Tabs */
+.tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+.tabs button{background:none;border:none;color:var(--muted);padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent}
+.tabs button.active{color:#fff;border-bottom-color:var(--accent)}
+/* Preview */
+.preview{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:12px;line-height:1.6;max-height:340px;overflow:auto}
+.preview img{max-width:100%;border-radius:8px;margin-top:8px}
+.muted{color:var(--muted)}
+.s-lbl{width:180px}
+.empty{color:var(--muted);text-align:center;padding:34px}
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(4,8,16,.66);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow:auto}
+.overlay.on{display:flex}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:16px;width:100%;max-width:820px;padding:20px}
+.modal h2{margin:0 0 4px;font-size:17px}
+.modal .x{float:right;cursor:pointer;color:var(--muted);font-size:20px;line-height:1}
+/* Toast */
+#toast{position:fixed;right:18px;bottom:18px;z-index:80;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--accent);padding:11px 15px;border-radius:10px;min-width:220px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast.err{border-left-color:var(--danger)}
+/* Mobil üst bar + çekmece */
+.topbar{display:none}
+.scrim{display:none}
+@media(max-width:860px){
+  .app{grid-template-columns:1fr}
+  .topbar{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:45;background:var(--panel);
+    border-bottom:1px solid var(--border);padding:12px 14px;font-weight:700;color:#fff}
+  .topbar .mb{background:none;border:none;color:var(--text);font-size:22px;padding:2px 6px;cursor:pointer}
+  .side{position:fixed;left:0;top:0;bottom:0;width:250px;height:100vh;transform:translateX(-100%);
+    transition:transform .22s ease;z-index:60}
+  .side.open{transform:none}
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55}
+  .scrim.on{display:block}
+  .main{padding:16px 14px}
+  .head{flex-direction:column;align-items:flex-start;gap:10px}
+  .head > div:last-child{width:100%}
+  .head select,.head input,.head button{width:100%}
+  .grid.k4{grid-template-columns:1fr 1fr}
+  .grid.k3,.grid.k2{grid-template-columns:1fr}
+  .stat .v{font-size:22px}
+  .s-lbl{width:100%}
+  .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{min-width:540px}
+  .modal{max-width:100%}
+  .overlay{padding:12px 8px}
+  .row{gap:8px}
+}
+@media(max-width:560px){ .grid.k4{grid-template-columns:1fr 1fr} .grid.k3,.grid.k2{grid-template-columns:1fr} table{min-width:480px} }
+@media(max-width:400px){ .grid.k4{grid-template-columns:1fr} }
+/* Giriş ekranı */
+.loginwrap{position:fixed;inset:0;background:radial-gradient(1200px 600px at 30% -10%,rgba(46,197,182,.10),transparent),var(--bg);
+  display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+.loginwrap.on{display:flex}
+.loginbox{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.loginbox h2{margin:0}
+</style>
+</head>
+<body>
+<div class="topbar"><button class="mb" id="menuBtn">☰</button><span>İçerik Paneli</span></div>
+<div class="scrim" id="scrim"></div>
+<div class="app">
+  <aside class="side">
+    <div class="brand">İçerik Paneli<small>editör kontrol merkezi</small></div>
+    <nav class="nav" id="nav">
+      <a href="#dashboard"><span class="ic">▚</span> Panel</a>
+      <a href="#queue"><span class="ic">☑</span> Onay Kuyruğu</a>
+      <a href="#content"><span class="ic">▤</span> İçerikler</a>
+      <a href="#add"><span class="ic">✎</span> İçerik Ekle</a>
+      <a href="#categories"><span class="ic">▦</span> Kategoriler</a>
+      <a href="#scheduled"><span class="ic">⏰</span> Planlanmış</a>
+      <a href="#pending"><span class="ic">🖼</span> Görsel Bekleyenler</a>
+      <a href="#sources"><span class="ic">⛃</span> Kaynaklar</a>
+      <a href="#accounts"><span class="ic">◎</span> Sosyal Hesaplar</a>
+      <a href="#publications"><span class="ic">➤</span> Yayınlar</a>
+      <a href="#usage"><span class="ic">$</span> Kullanım / Maliyet</a>
+      <a href="#settings"><span class="ic">⚙</span> Ayarlar</a>
+      <a href="#" id="logout"><span class="ic">⎋</span> Çıkış</a>
+    </nav>
+  </aside>
+  <main class="main" id="view"></main>
+</div>
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="loginwrap" id="login"><form class="loginbox" id="loginForm">
+  <h2>Giriş</h2><div class="sub muted" style="margin-bottom:16px">İçerik Paneli</div>
+  <label>E-posta</label><input id="lg-u" type="text" autocomplete="username">
+  <label>Şifre</label><input id="lg-p" type="password" autocomplete="current-password">
+  <button class="btn pri" style="width:100%;margin-top:18px" type="submit">Giriş yap</button>
+  <div id="lg-err" class="chip dng" style="display:none;margin-top:12px"></div>
+</form></div>
+<div id="toast"></div>
+
+<script>
+const API = "/api/v1";
+const $ = (s,r=document)=>r.querySelector(s);
+const h = (s)=>String(s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money = n => "$"+Number(n||0).toFixed(4);
+
+function getToken(){ return localStorage.getItem('cp_token'); }
+function setToken(t){ t? localStorage.setItem('cp_token',t): localStorage.removeItem('cp_token'); }
+async function api(path, opts={}){
+  const o = Object.assign({headers:{}}, opts);
+  const tok=getToken(); if(tok) o.headers["Authorization"]="Bearer "+tok;
+  if(o.body && !(o.body instanceof FormData)){ o.headers["Content-Type"]="application/json"; o.body=JSON.stringify(o.body); }
+  const r = await fetch(API+path, o);
+  if(r.status===401){ setToken(null); showLogin(); throw new Error('Oturum sona erdi, tekrar giriş yapın'); }
+  if(!r.ok){ let m=r.status; try{const e=await r.json(); m=e.message||e.title||JSON.stringify(e);}catch{} throw new Error(m); }
+  const t = await r.text(); return t? JSON.parse(t): null;
+}
+function toast(msg, err=false){ const t=document.createElement('div'); t.className='toast'+(err?' err':''); t.textContent=msg; $('#toast').appendChild(t); setTimeout(()=>t.remove(),3200); }
+function openModal(html){ $('#modal').innerHTML=html; $('#overlay').classList.add('on'); }
+function closeModal(){ $('#overlay').classList.remove('on'); }
+$('#overlay').addEventListener('click',e=>{ if(e.target.id==='overlay') closeModal(); });
+
+const statusChip = s => {
+  const map={Published:'ok',Approved:'ok',ReadyToPublish:'ok',PendingReview:'warn',Draft:'warn',Failed:'dng',Rejected:'dng',Archived:'mut',Pending:'warn',Scheduled:'test',Skipped:'mut'};
+  return `<span class="chip ${map[s]||'mut'}">${h(s)}</span>`;
+};
+
+/* ---------------- Router ---------------- */
+const routes = {
+  dashboard:renderDashboard, queue:renderQueue, content:renderContent, add:renderAdd,
+  categories:renderCategories, scheduled:renderScheduled, pending:renderPending, sources:renderSources, accounts:renderAccounts,
+  publications:renderPublications, usage:renderUsage, settings:renderSettings
+};
+/* Kategori önbelleği + seçici */
+let _cats=null;
+async function cats(force){ if(force) _cats=null; if(!_cats) _cats=await api('/categories').catch(()=>[]); return _cats; }
+function catSelect(id, list, sel){ return `<select id="${id}"><option value="">— kategori yok —</option>${list.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${h(c.name)}${c.isActive?'':' (kapalı)'}</option>`).join('')}</select>`; }
+function catName(list,id){ const c=list.find(x=>x.id===id); return c?c.name:'—'; }
+async function route(){
+  const key=(location.hash.replace('#','')||'dashboard');
+  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+key));
+  const fn=routes[key]||renderDashboard;
+  // Eski ekranın #view üzerindeki delege dinleyicilerini temizle (birikip çift tetiklemeyi önler)
+  const old=$('#view'); const fresh=old.cloneNode(false); old.parentNode.replaceChild(fresh,old);
+  fresh.innerHTML='<div class="empty">Yükleniyor…</div>';
+  try{ await fn(); }catch(e){ $('#view').innerHTML=`<div class="card empty">Hata: ${h(e.message)}</div>`; }
+}
+window.addEventListener('hashchange',route);
+
+function head(title,sub,right=''){ return `<div class="head"><div><h1>${h(title)}</h1>${sub?`<div class="sub">${h(sub)}</div>`:''}</div><div>${right}</div></div>`; }
+
+/* ---------------- Dashboard ---------------- */
+async function renderDashboard(){
+  const [queue, published, usage, sources, accounts, channels, pending, catList] = await Promise.all([
+    api('/editorial?status=PendingReview&size=1').catch(()=>({total:0})),
+    api('/editorial?status=Published&size=1').catch(()=>({total:0})),
+    api('/publishing/usage?days=30').catch(()=>({totalUsd:0,totalTry:0,rows:[]})),
+    api('/sources').catch(()=>[]),
+    api('/social-accounts').catch(()=>[]),
+    api('/publishing/channels').catch(()=>({available:[]})),
+    api('/editorial/pending-image').catch(()=>[]),
+    api('/categories').catch(()=>[])
+  ]);
+  const activeSrc=sources.filter(s=>s.isActive).length;
+  const activeAcc=accounts.filter(a=>a.status==='Active').length;
+  const errAcc=accounts.filter(a=>a.status==='Error').length;
+  const chips=(channels.available||[]).map(c=>`<span class="chip ok">${h(c)}</span>`).join(' ')||'<span class="chip mut">kayıtlı kanal yok</span>';
+  $('#view').innerHTML = head('Panel','Genel durum ve son 30 gün maliyeti') + `
+    <div class="grid k4">
+      <div class="stat"><div class="v">${queue.total??0}</div><div class="l">Onay bekleyen</div></div>
+      <div class="stat"><div class="v">${published.total??0}</div><div class="l">Yayınlanan içerik</div></div>
+      <div class="stat"><div class="v">${money(usage.totalUsd)}</div><div class="l">30 günlük API maliyeti</div></div>
+      <div class="stat"><div class="v">${usage.totalTry?('₺'+Number(usage.totalTry).toFixed(2)):'—'}</div><div class="l">TL karşılığı${usage.usdToTry?` (kur ${usage.usdToTry})`:''}</div></div>
+    </div>
+    <div class="grid k4">
+      <div class="stat"><div class="v">${catList.length}</div><div class="l">Kategori</div></div>
+      <div class="stat"><div class="v">${activeSrc}/${sources.length}</div><div class="l">Aktif kaynak</div></div>
+      <div class="stat"><div class="v">${activeAcc}/${accounts.length}${errAcc?` <span class="chip dng" style="font-size:11px">${errAcc} hata</span>`:''}</div><div class="l">Aktif sosyal hesap</div></div>
+      <div class="stat"><div class="v">${pending.length}</div><div class="l">Görsel bekleyen</div></div>
+    </div>
+    <div class="card"><h3 style="margin-top:0">Kayıtlı yayın kanalları</h3><div class="row">${chips}</div></div>
+    <div class="card"><h3 style="margin-top:0">Hızlı erişim</h3>
+      <div class="row"><button class="btn pri" id="d-discover">Şimdi tara</button><a class="btn" href="#queue">Onay Kuyruğu</a><a class="btn" href="#add">İçerik Ekle</a>
+      <a class="btn" href="#categories">Kategoriler</a><a class="btn" href="#usage">Kullanım/Maliyet</a><a class="btn" href="#settings">API Anahtarları</a></div>
+    </div>`;
+  $('#d-discover').onclick=async()=>{ try{ const r=await api('/sources/discover',{method:'POST'}); toast(`Tarandı — ${r.discovered} yeni öğe kuyruğa alındı`); }catch(e){toast(e.message,true);} };
+}
+
+/* ---------------- Onay Kuyruğu ---------------- */
+async function renderQueue(){
+  const items = await api('/editorial/queue');
+  const rows = items.map(i=>`
+    <tr data-id="${i.id}">
+      <td><input type="checkbox" class="q-sel" value="${i.id}"></td>
+      <td><a href="#" class="q-prev">${h(i.title||'(başlıksız)')}</a><div class="muted" style="font-size:12px">${h(i.origin)}</div></td>
+      <td><select class="q-img">
+        <option value="SkiaCard">SkiaCard (başlık kartı)</option>
+        <option value="Ai">AI görsel</option>
+        <option value="Manual">Ben yükleyeceğim</option>
+      </select></td>
+      <td><label class="row" style="margin:0"><input type="checkbox" class="q-test" style="width:auto"> Test</label></td>
+      <td><input type="datetime-local" class="q-when" title="Boş = kategori kadansı / hemen"></td>
+      <td class="row"><button class="btn pri sm q-ok">Onayla</button><button class="btn dng sm q-no">Reddet</button></td>
+    </tr>`).join('');
+  $('#view').innerHTML = head('Onay Kuyruğu','RSS/sayfa ham içerikleri — AI onaydan sonra çalışır (maliyet kontrolü). Zaman boşsa kategori kadansına göre planlanır.',
+    `<button class="btn pri" id="bulk">Seçilenleri Onayla</button>`) +
+    `<div class="card"><table><thead><tr><th style="width:30px"></th><th>İçerik</th><th style="width:200px">Görsel kaynağı</th><th style="width:70px">Mod</th><th style="width:190px">Yayın zamanı</th><th style="width:170px"></th></tr></thead>
+     <tbody>${rows||'<tr><td colspan=6 class="empty">Kuyruk boş.</td></tr>'}</tbody></table></div>`;
+
+  $('#view').addEventListener('click', async e=>{
+    const tr=e.target.closest('tr'); const id=tr?.dataset.id;
+    if(e.target.classList.contains('q-ok')){
+      const img=tr.querySelector('.q-img').value, test=tr.querySelector('.q-test').checked;
+      const w=tr.querySelector('.q-when').value; const scheduledAt=w?new Date(w).toISOString():null;
+      try{ await api(`/editorial/${id}/approve`,{method:'POST',body:{imageSource:img,testMode:test,scheduledAt}}); toast('Onaylandı, üretim sıraya alındı'); route(); }catch(e){toast(e.message,true);}
+    }
+    if(e.target.classList.contains('q-no')){ try{ await api(`/editorial/${id}/reject`,{method:'POST'}); toast('Reddedildi'); route(); }catch(e){toast(e.message,true);} }
+    if(e.target.classList.contains('q-prev')){ e.preventDefault(); showDetail(id); }
+  });
+  $('#bulk').onclick=async()=>{
+    const ids=[...document.querySelectorAll('.q-sel:checked')].map(c=>c.value);
+    if(!ids.length) return toast('Seçim yok',true);
+    try{ const r=await api('/editorial/bulk-approve',{method:'POST',body:{ids}}); toast(`${r.approved}/${r.total} onaylandı`); route(); }catch(e){toast(e.message,true);}
+  };
+}
+
+/* ---------------- İçerikler ---------------- */
+async function renderContent(){
+  const statuses=['','PendingReview','Draft','Approved','Published','Failed','Archived','Rejected'];
+  const sel = statuses.map(s=>`<option value="${s}">${s||'Tümü'}</option>`).join('');
+  $('#view').innerHTML = head('İçerikler','Durum filtreli liste; satıra tıkla → düzenle / önizle / yayınlar',
+    `<select id="fstatus" style="width:180px">${sel}</select>`);
+  const box=document.createElement('div'); box.className='card'; box.id='clist'; $('#view').appendChild(box);
+  async function load(){ const st=$('#fstatus').value; const r=await api(`/editorial?size=50${st?`&status=${st}`:''}`);
+    box.innerHTML = `<table><thead><tr><th>Başlık</th><th style="width:130px">Durum</th><th style="width:120px">Medya</th><th style="width:90px">Mod</th><th style="width:160px">Tarih</th></tr></thead><tbody>${
+      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td><td>${statusChip(i.editorialStatus)}</td><td class="muted">${h(i.mediaStatus)}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||'<tr><td colspan=5 class="empty">Kayıt yok.</td></tr>'
+    }</tbody></table>`;
+    box.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>showDetail(tr.dataset.id));
+  }
+  $('#fstatus').onchange=load; await load();
+}
+
+async function showDetail(id){
+  const d=await api(`/editorial/${id}`);
+  const pubs=await api(`/publishing/publications?contentItemId=${id}`).catch(()=>[]);
+  const cl=await cats();
+  openModal(`
+    <span class="x" onclick="closeModal()">×</span>
+    <h2>${h(d.title||'(başlıksız)')}</h2>
+    <div class="muted" style="margin-bottom:10px">${statusChip(d.editorialStatus)} · medya: ${h(d.mediaStatus)} · görsel: ${h(d.imageSource)} · kategori: ${h(catName(cl,d.categoryId))}${d.scheduledAt?` · planlı: ${new Date(d.scheduledAt).toLocaleString('tr')}`:''} ${d.testMode?'· <span class=\"chip test\">TEST</span>':''}</div>
+    <div class="tabs"><button class="active" data-t="edit">Düzenle</button><button data-t="prev">Önizleme</button><button data-t="pub">Yayınlar (${pubs.length})</button></div>
+    <div id="tab-edit">
+      <label>Başlık</label><input id="e-title" type="text" value="${h(d.title)}">
+      <label>Kısa (X) — satır sonları korunur</label><textarea id="e-short">${h(d.shortX)}</textarea>
+      <label>Ana metin (blog/HTML) — paragraflar korunur</label><textarea id="e-body" style="min-height:150px">${h(d.bodyHtml)}</textarea>
+      <label>Instagram açıklaması</label><textarea id="e-ig">${h(d.instagramCaption)}</textarea>
+      <label>Etiketler (virgülle)</label><input id="e-tags" type="text" value="${h((d.tags||[]).join(', '))}">
+      <div class="row" style="margin-top:14px">
+        <button class="btn pri" id="e-save">Kaydet (yeni revizyon)</button>
+        <label class="row" style="margin:0"><input type="checkbox" id="e-test" ${d.testMode?'checked':''} style="width:auto"> Test modu</label>
+        <button class="btn dng right" id="e-retract">Geri çek</button>
+      </div>
+    </div>
+    <div id="tab-prev" style="display:none">
+      ${d.mediaUrl?`<img src="${h(d.mediaUrl)}" alt="görsel">`:''}
+      <div class="preview" style="margin-top:10px">${h(d.shortX||d.bodyHtml||'')}</div>
+    </div>
+    <div id="tab-pub" style="display:none">
+      <table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th>Deneme</th><th></th></tr></thead><tbody>${
+        pubs.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=5 class="empty">Henüz yayın yok.</td></tr>'
+      }</tbody></table>
+    </div>`);
+  $('#modal').querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+    $('#modal').querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    ['edit','prev','pub'].forEach(t=>$('#tab-'+t).style.display=(t===b.dataset.t?'block':'none'));
+  });
+  $('#e-save').onclick=async()=>{
+    const body={ title:$('#e-title').value, shortX:$('#e-short').value, bodyHtml:$('#e-body').value,
+      instagramCaption:$('#e-ig').value, tags:$('#e-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
+      primaryKeyword:null, imageAltText:null };
+    try{ await api(`/editorial/${id}/revision`,{method:'PUT',body}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);}
+  };
+  $('#e-test').onchange=async(ev)=>{ try{ await api(`/editorial/${id}/testmode`,{method:'POST',body:{enabled:ev.target.checked}}); toast('Test modu güncellendi'); }catch(e){toast(e.message,true);} };
+  $('#e-retract').onclick=async()=>{ if(!confirm('Geri çekilsin mi?'))return; try{ await api(`/editorial/${id}/retract`,{method:'POST'}); toast('Geri çekildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
+}
+async function retryPub(id){ try{ const r=await api(`/publishing/publications/${id}/retry`,{method:'POST'}); toast(r.published?'Yayınlandı':'Tekrar denendi'); }catch(e){toast(e.message,true);} }
+
+/* ---------------- İçerik Ekle ---------------- */
+async function renderAdd(){
+  const cl=await cats();
+  $('#view').innerHTML = head('İçerik Ekle','Yapıştır ve AI ile üret, ya da bitmiş metni AI olmadan ekle') + `
+    <div class="card">
+      <div class="tabs"><button class="active" data-t="ai">AI ile üret</button><button data-t="noai">AI'sız (bitmiş metin)</button></div>
+      <div id="add-ai">
+        <label>Başlık / konu</label><input id="a-title" type="text" placeholder="Kısa başlık ya da konu">
+        <label>Kaynak metin (yapıştır) — paragraflar korunur</label><textarea id="a-raw" style="min-height:150px"></textarea>
+        <label>Kategori</label>${catSelect('a-cat',cl,'')}
+        ${imgAndOpts('a')}
+        <label>Yayın zamanı (boş = kategori kadansı / hemen)</label><input type="datetime-local" id="a-when">
+        <button class="btn pri" style="margin-top:12px" id="a-save">Ekle → AI üretsin</button>
+      </div>
+      <div id="add-noai" style="display:none">
+        <label>Başlık</label><input id="n-title" type="text">
+        <label>Kısa (X)</label><textarea id="n-short"></textarea>
+        <label>Ana metin (blog/HTML) — paragraflar korunur</label><textarea id="n-body" style="min-height:150px"></textarea>
+        <label>Instagram açıklaması (opsiyonel)</label><textarea id="n-ig"></textarea>
+        <label>Etiketler (virgülle)</label><input id="n-tags" type="text">
+        <label>Kategori</label>${catSelect('n-cat',cl,'')}
+        ${imgAndOpts('n')}
+        <label>Yayın zamanı (boş = kategori kadansı / hemen)</label><input type="datetime-local" id="n-when">
+        <button class="btn pri" style="margin-top:12px" id="n-save">Ekle (AI yok)</button>
+      </div>
+    </div>`;
+  $('#view').querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+    $('#view').querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    $('#add-ai').style.display=b.dataset.t==='ai'?'block':'none'; $('#add-noai').style.display=b.dataset.t==='noai'?'block':'none';
+  });
+  $('#a-save').onclick=async()=>{
+    try{ await api('/editorial/manual',{method:'POST',body:{title:$('#a-title').value,rawInput:$('#a-raw').value,
+      categoryId:$('#a-cat').value||null,imageSource:$('#a-img').value,testMode:$('#a-test').checked,
+      scheduledAt:$('#a-when').value?new Date($('#a-when').value).toISOString():null}}); toast('Eklendi, AI üretimi sıraya alındı'); location.hash='#content'; }catch(e){toast(e.message,true);}
+  };
+  $('#n-save').onclick=async()=>{
+    try{ await api('/editorial/manual-no-ai',{method:'POST',body:{title:$('#n-title').value,shortX:$('#n-short').value,
+      bodyHtml:$('#n-body').value,instagramCaption:$('#n-ig').value||null,tags:$('#n-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
+      primaryKeyword:null,imageAltText:null,categoryId:$('#n-cat').value||null,imageSource:$('#n-img').value,testMode:$('#n-test').checked,
+      scheduledAt:$('#n-when').value?new Date($('#n-when').value).toISOString():null}}); toast('Eklendi'); location.hash='#content'; }catch(e){toast(e.message,true);}
+  };
+}
+function imgAndOpts(p){ return `<div class="grid k2"><div><label>Görsel kaynağı</label><select id="${p}-img">
+   <option value="SkiaCard">SkiaCard (başlık kartı)</option><option value="Ai">AI görsel</option><option value="Manual">Ben yükleyeceğim</option></select></div>
+   <div><label>Yayın modu</label><label class="row" style="margin-top:9px"><input type="checkbox" id="${p}-test" style="width:auto"> Test yayını (gerçek takipçiye gitmez)</label></div></div>`; }
+
+/* ---------------- Kategoriler ---------------- */
+async function renderCategories(){
+  const list=await cats(true);
+  $('#view').innerHTML=head('Kategoriler','Sistemin belkemiği — kaynaklar, hedefler ve içerikler kategoriye asılır',
+    `<button class="btn pri" id="c-new">Kategori Ekle</button>`)+
+    `<div class="card"><table><thead><tr><th>Ad</th><th>Slug</th><th>Dil</th><th>Görsel</th><th>Yayın kadansı</th><th>Reklam/N</th><th>RSS oto-onay</th><th>Durum</th><th style="width:150px"></th></tr></thead><tbody>${
+      list.map(c=>`<tr data-id="${c.id}"><td>${h(c.name)}</td><td class="muted">${h(c.slug)}</td><td>${h(c.language||'—')}</td><td>${h(c.defaultImageSource)}</td><td class="muted">${h(cadenceText(c))}</td><td>${c.adEveryNPosts}</td><td>${c.rssAutoApprove?'✓':'—'}</td>
+        <td>${c.isActive?'<span class=\"chip ok\">Aktif</span>':'<span class=\"chip mut\">Kapalı</span>'}</td>
+        <td class="row"><button class="btn sm c-edit">Düzenle</button><button class="btn sm c-tog">${c.isActive?'Kapat':'Aç'}</button></td></tr>`).join('')||'<tr><td colspan=9 class="empty">Kategori yok. İlk kategoriyi ekleyin.</td></tr>'
+    }</tbody></table></div>`;
+  $('#c-new').onclick=()=>catForm();
+  $('#view').addEventListener('click',async e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
+    if(e.target.classList.contains('c-edit')) catForm(list.find(x=>x.id===id));
+    if(e.target.classList.contains('c-tog')){ try{ await api(`/categories/${id}/toggle`,{method:'POST'}); route(); }catch(e){toast(e.message,true);} }
+  });
+}
+function catForm(c){
+  const e=c||{name:'',slug:'',language:'tr',defaultImageSource:'SkiaCard',adEveryNPosts:5,rssAutoApprove:false,
+    scheduleMode:'Immediate',postsPerDay:0,dailyTimes:'',intervalMinutes:0,timeZoneId:'Europe/Istanbul'};
+  const mo=m=>e.scheduleMode===m?'selected':'';
+  openModal(`<span class="x" onclick="closeModal()">×</span><h2>${c?'Kategori Düzenle':'Kategori Ekle'}</h2>
+    <div class="grid k2">
+      <div><label>Ad</label><input id="c-name" type="text" value="${h(e.name)}"></div>
+      <div><label>Slug (boş bırak → otomatik)</label><input id="c-slug" type="text" value="${h(e.slug)}"></div>
+      <div><label>Dil</label><input id="c-lang" type="text" value="${h(e.language||'')}" placeholder="tr"></div>
+      <div><label>Varsayılan görsel</label><select id="c-img"><option ${e.defaultImageSource==='SkiaCard'?'selected':''}>SkiaCard</option><option ${e.defaultImageSource==='Ai'?'selected':''}>Ai</option><option ${e.defaultImageSource==='Manual'?'selected':''}>Manual</option></select></div>
+      <div><label>Kaç içerikte bir reklam</label><input id="c-adn" type="number" value="${e.adEveryNPosts}"></div>
+      <div><label style="margin-top:26px" class="row"><input type="checkbox" id="c-auto" ${e.rssAutoApprove?'checked':''} style="width:auto"> RSS otomatik onay (onaysız üret)</label></div>
+    </div>
+    <h3 style="margin:18px 0 4px">Yayın kadansı</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Bu kategorinin içerikleri hangi sıklıkta paylaşılsın? (Test içerik daima anında test kanalına gider.)</div>
+    <div class="grid k2">
+      <div><label>Mod</label><select id="c-smode">
+        <option value="Immediate" ${mo('Immediate')}>Hemen (onaylanınca)</option>
+        <option value="DailySlots" ${mo('DailySlots')}>Gün içi sabit saatler</option>
+        <option value="Interval" ${mo('Interval')}>Belirli aralıkla</option>
+      </select></div>
+      <div><label>Günlük tavan (0 = sınırsız)</label><input id="c-ppd" type="number" min="0" value="${e.postsPerDay}"></div>
+      <div id="c-slotwrap"><label>Saatler (virgülle, HH:mm)</label><input id="c-times" type="text" value="${h(e.dailyTimes||'')}" placeholder="09:00, 12:00, 18:00"></div>
+      <div id="c-ivwrap"><label>Aralık (dakika)</label><input id="c-iv" type="number" min="0" value="${e.intervalMinutes}" placeholder="120"></div>
+      <div><label>Saat dilimi</label><input id="c-tz" type="text" value="${h(e.timeZoneId||'Europe/Istanbul')}" placeholder="Europe/Istanbul"></div>
+    </div>
+    <button class="btn pri" style="margin-top:14px" id="c-save">Kaydet</button>`);
+  const syncMode=()=>{ const m=$('#c-smode').value;
+    $('#c-slotwrap').style.display=m==='DailySlots'?'':'none';
+    $('#c-ivwrap').style.display=m==='Interval'?'':'none'; };
+  $('#c-smode').onchange=syncMode; syncMode();
+  $('#c-save').onclick=async()=>{
+    const body={name:$('#c-name').value,slug:$('#c-slug').value,language:$('#c-lang').value||null,
+      defaultImageSource:$('#c-img').value,adEveryNPosts:+$('#c-adn').value,rssAutoApprove:$('#c-auto').checked,
+      scheduleMode:$('#c-smode').value,postsPerDay:+$('#c-ppd').value,dailyTimes:$('#c-times').value,
+      intervalMinutes:+$('#c-iv').value,timeZoneId:$('#c-tz').value||'Europe/Istanbul'};
+    try{ if(c) await api(`/categories/${c.id}`,{method:'PUT',body}); else await api('/categories',{method:'POST',body});
+      toast('Kaydedildi'); closeModal(); _cats=null; route(); }catch(e){toast(e.message,true);}
+  };
+}
+function cadenceText(c){
+  if(!c||c.scheduleMode==='Immediate'||!c.scheduleMode) return 'Hemen';
+  const cap=c.postsPerDay>0?` · ≤${c.postsPerDay}/gün`:'';
+  if(c.scheduleMode==='DailySlots') return `Saatler: ${h(c.dailyTimes||'—')}${cap}`;
+  if(c.scheduleMode==='Interval') return `Her ${c.intervalMinutes||0} dk${cap}`;
+  return c.scheduleMode;
+}
+
+/* ---------------- Planlanmış ---------------- */
+async function renderScheduled(){
+  const list=await api('/publishing/scheduled');
+  $('#view').innerHTML=head('Planlanmış Yayınlar','Zamanı gelince otomatik gönderilecek yayınlar — yeniden planla, hemen gönder veya iptal et')+
+    `<div class="card"><table><thead><tr><th style="width:190px">Planlı zaman</th><th>Kanal</th><th>Hedef</th><th>İçerik</th><th style="width:260px"></th></tr></thead><tbody>${
+      list.map(p=>`<tr data-id="${p.id}"><td>${p.scheduledAt?new Date(p.scheduledAt).toLocaleString('tr'):'—'}</td><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td>
+        <td><button class="btn sm" onclick="showDetail('${p.contentItemId}')">Aç</button></td>
+        <td class="row"><button class="btn sm sc-when">Yeniden planla</button><button class="btn pri sm sc-now">Şimdi gönder</button><button class="btn dng sm sc-cancel">İptal</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Planlı yayın yok.</td></tr>'
+    }</tbody></table></div>`;
+  $('#view').addEventListener('click',async e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
+    if(e.target.classList.contains('sc-now')){ if(!confirm('Şimdi gönderilsin mi?'))return; try{ const r=await api(`/publishing/publications/${id}/publish-now`,{method:'POST'}); toast(r.published?'Gönderildi':'Denendi'); route(); }catch(e){toast(e.message,true);} }
+    if(e.target.classList.contains('sc-cancel')){ if(!confirm('Plan iptal edilsin mi?'))return; try{ await api(`/publishing/publications/${id}/cancel`,{method:'POST'}); toast('İptal edildi'); route(); }catch(e){toast(e.message,true);} }
+    if(e.target.classList.contains('sc-when')){ rescheduleForm(id); }
+  });
+}
+function rescheduleForm(id){
+  openModal(`<span class="x" onclick="closeModal()">×</span><h2>Yeniden planla</h2>
+    <label>Yeni yayın zamanı (boş = hemen)</label><input type="datetime-local" id="rs-when">
+    <button class="btn pri" style="margin-top:14px" id="rs-save">Kaydet</button>`);
+  $('#rs-save').onclick=async()=>{ const w=$('#rs-when').value; const scheduledAt=w?new Date(w).toISOString():null;
+    try{ await api(`/publishing/publications/${id}/reschedule`,{method:'POST',body:{scheduledAt}}); toast('Yeniden planlandı'); closeModal(); route(); }catch(e){toast(e.message,true);} };
+}
+
+/* ---------------- Görsel Bekleyenler ---------------- */
+async function renderPending(){
+  const items=await api('/editorial/pending-image');
+  $('#view').innerHTML=head('Görsel Bekleyenler','"Ben yükleyeceğim" seçilen içerikler — görsel yükleyince yayına girer')+
+    `<div class="card"><table><thead><tr><th>Başlık</th><th style="width:220px">Görsel</th></tr></thead><tbody>${
+      items.map(i=>`<tr><td>${h(i.title||'(başlıksız)')}</td><td><input type="file" accept="image/*" data-id="${i.id}" class="up"></td></tr>`).join('')||'<tr><td colspan=2 class="empty">Bekleyen yok.</td></tr>'
+    }</tbody></table></div>`;
+  $('#view').querySelectorAll('.up').forEach(inp=>inp.onchange=async()=>{
+    const f=inp.files[0]; if(!f)return; const fd=new FormData(); fd.append('file',f);
+    try{ await api(`/editorial/${inp.dataset.id}/image`,{method:'POST',body:fd}); toast('Görsel yüklendi, yayına alınıyor'); route(); }catch(e){toast(e.message,true);}
+  });
+}
+
+/* ---------------- Kaynaklar ---------------- */
+async function renderSources(){
+  const list=await api('/sources');
+  const cl=await cats();
+  const fmt=t=>t?new Date(t).toLocaleString('tr'):'—';
+  $('#view').innerHTML=head('Kaynaklar','RSS / sayfa kaynakları — ekle, test et, düzenle, aç/kapa',
+    `<button class="btn pri" id="s-discover">Şimdi tara</button>`)+`
+    <div class="card"><h3 style="margin-top:0">Yeni kaynak</h3>
+      <div class="grid k4">
+        <div><label>Tür</label><select id="s-type"><option>Rss</option><option>WebPage</option></select></div>
+        <div><label>URL</label><input id="s-url" type="text" placeholder="https://…/feed"></div>
+        <div><label>Tarama (dk)</label><input id="s-int" type="number" value="15"></div>
+        <div><label>Kategori</label>${catSelect('s-cat',cl,'')}</div>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="btn" id="s-test">Test et</button><button class="btn pri" id="s-add">Ekle</button></div>
+      <div id="s-testout"></div>
+    </div>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px"><label style="margin:0">Kategoriye göre:</label><select id="s-filter" style="width:auto"><option value="">Tümü</option>${cl.map(c=>`<option value="${c.id}">${h(c.name)}</option>`).join('')}</select></div>
+      <table><thead><tr><th>Tür</th><th>URL</th><th style="width:130px">Kategori</th><th style="width:70px">Aralık</th><th style="width:150px">Son tarama</th><th style="width:80px">Durum</th><th style="width:210px"></th></tr></thead><tbody id="s-rows">${
+      list.map(s=>`<tr data-id="${s.id}" data-cat="${s.categoryId||''}"><td>${h(s.type)}</td><td class="muted">${h(s.url||'')}</td><td class="muted">${h(catName(cl,s.categoryId))}</td><td>${s.pollIntervalMinutes}dk</td><td class="muted">${fmt(s.lastPolledAt)}</td><td>${s.isActive?'<span class=\"chip ok\">Aktif</span>':'<span class=\"chip mut\">Kapalı</span>'}</td>
+        <td class="row"><button class="btn sm s-edit">Düzenle</button><button class="btn sm s-tog">${s.isActive?'Kapat':'Aç'}</button><button class="btn dng sm s-del">Sil</button></td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kaynak yok.</td></tr>'
+    }</tbody></table></div>`;
+  $('#s-add').onclick=async()=>{ try{ await api('/sources',{method:'POST',body:{categoryId:$('#s-cat').value||null,type:$('#s-type').value,url:$('#s-url').value,pollIntervalMinutes:+$('#s-int').value,selector:null}}); toast('Eklendi'); route(); }catch(e){toast(e.message,true);} };
+  $('#s-test').onclick=async()=>{ try{ const items=await api('/sources/test',{method:'POST',body:{type:$('#s-type').value,url:$('#s-url').value,selector:null}});
+    $('#s-testout').innerHTML=`<div class="preview" style="margin-top:12px">${items.map(i=>'• '+h(i.title)).join('\n')||'Öğe bulunamadı'}</div>`; }catch(e){toast(e.message,true);} };
+  $('#s-discover').onclick=async()=>{ try{ const r=await api('/sources/discover',{method:'POST'}); toast(`Tarandı — ${r.discovered} yeni öğe kuyruğa alındı`); route(); }catch(e){toast(e.message,true);} };
+  $('#s-filter').onchange=()=>{ const f=$('#s-filter').value; $('#s-rows').querySelectorAll('tr[data-id]').forEach(tr=>{ tr.style.display=(!f||tr.dataset.cat===f)?'':'none'; }); };
+  $('#view').addEventListener('click',async e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
+    if(e.target.classList.contains('s-edit')) sourceForm(list.find(x=>x.id===id),cl);
+    if(e.target.classList.contains('s-tog')){ try{ await api(`/sources/${id}/toggle`,{method:'POST'}); route(); }catch(e){toast(e.message,true);} }
+    if(e.target.classList.contains('s-del')){ if(!confirm('Silinsin mi?'))return; try{ await api(`/sources/${id}`,{method:'DELETE'}); route(); }catch(e){toast(e.message,true);} }
+  });
+}
+function sourceForm(s,cl){
+  openModal(`<span class="x" onclick="closeModal()">×</span><h2>Kaynağı Düzenle</h2>
+    <div class="grid k2">
+      <div><label>URL</label><input id="se-url" type="text" value="${h(s.url||'')}"></div>
+      <div><label>Tarama (dk)</label><input id="se-int" type="number" value="${s.pollIntervalMinutes}"></div>
+      <div><label>Kategori</label>${catSelect('se-cat',cl,s.categoryId||'')}</div>
+    </div>
+    <button class="btn pri" style="margin-top:14px" id="se-save">Kaydet</button>`);
+  $('#se-save').onclick=async()=>{ try{ await api(`/sources/${s.id}`,{method:'PUT',body:{categoryId:$('#se-cat').value||null,url:$('#se-url').value,pollIntervalMinutes:+$('#se-int').value,selector:null}}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
+}
+
+/* ---------------- Sosyal Hesaplar ---------------- */
+const CREDS={Telegram:['BotToken'],X:['ApiKey','ApiSecret','AccessToken','AccessTokenSecret'],Instagram:['IgUserId','PageId','LongLivedToken'],Threads:['ThreadsUserId','AccessToken']};
+async function renderAccounts(){
+  const list=await api('/social-accounts');
+  $('#view').innerHTML=head('Sosyal Hesaplar','Tüm API anahtarları/token buradan girilir (şifreli saklanır)',
+    `<button class="btn pri" id="acc-new">Hesap Ekle</button>`)+
+    `<div class="card"><table><thead><tr><th>Ad</th><th>Platform</th><th>Durum</th><th>Token bitiş</th><th style="width:130px"></th></tr></thead><tbody>${
+      list.map(a=>`<tr data-id="${a.id}"><td>${h(a.displayName)}</td><td>${h(a.platform)}</td><td>${a.status==='Active'?'<span class=\"chip ok\">Aktif</span>':(a.status==='Error'?'<span class=\"chip dng\">Hata</span>':'<span class=\"chip mut\">Kapalı</span>')}</td>
+        <td class="muted">${a.tokenExpiresAt?new Date(a.tokenExpiresAt).toLocaleDateString('tr'):'—'}</td><td><button class="btn sm a-det">Hedefler</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hesap yok.</td></tr>'
+    }</tbody></table></div>`;
+  $('#acc-new').onclick=()=>accountForm();
+  $('#view').addEventListener('click',e=>{ const tr=e.target.closest('tr[data-id]'); if(tr&&e.target.classList.contains('a-det')) accountDetail(tr.dataset.id); });
+}
+function accountForm(){
+  openModal(`<span class="x" onclick="closeModal()">×</span><h2>Hesap Ekle</h2>
+    <label>Platform</label><select id="ac-p">${Object.keys(CREDS).map(p=>`<option>${p}</option>`).join('')}</select>
+    <label>Görünen ad</label><input id="ac-name" type="text" placeholder="ör. @kriptohaber">
+    <div id="ac-creds"></div>
+    <label>Token bitiş (opsiyonel — IG/Threads)</label><input id="ac-exp" type="text" placeholder="2026-09-01">
+    <button class="btn pri" style="margin-top:14px" id="ac-save">Kaydet (şifreli)</button>`);
+  const draw=()=>{ const p=$('#ac-p').value; $('#ac-creds').innerHTML=CREDS[p].map(k=>`<label>${k}</label><input type="password" class="cred" data-k="${k}">`).join(''); };
+  $('#ac-p').onchange=draw; draw();
+  $('#ac-save').onclick=async()=>{
+    const creds={}; $('#modal').querySelectorAll('.cred').forEach(i=>creds[i.dataset.k]=i.value);
+    const exp=$('#ac-exp').value?new Date($('#ac-exp').value).toISOString():null;
+    try{ await api('/social-accounts',{method:'POST',body:{platform:$('#ac-p').value,displayName:$('#ac-name').value,credentials:creds,tokenExpiresAt:exp,siteId:null}}); toast('Hesap eklendi'); closeModal(); route(); }catch(e){toast(e.message,true);}
+  };
+}
+async function accountDetail(id){
+  const d=await api(`/social-accounts/${id}`);
+  const cl=await cats();
+  openModal(`<span class="x" onclick="closeModal()">×</span><h2>${h(d.displayName)} — ${h(d.platform)}</h2>
+    ${d.lastError?`<div class="chip dng">${h(d.lastError)}</div>`:''}
+    <h3>Hedefler (grup/kanal/profil)</h3>
+    <table><thead><tr><th>Başlık</th><th>Rol</th><th>Kategori</th><th>Dış ID</th><th></th></tr></thead><tbody>${
+      d.targets.map(t=>`<tr><td>${h(t.title)}</td><td><span class="chip ${t.role==='AdminInbox'?'test':'mut'}">${h(t.role)}</span></td><td class="muted">${h(catName(cl,t.categoryId))}</td><td class="muted">${h(t.externalTargetId)}</td><td><button class="btn dng sm" onclick="disableTarget('${t.id}')">Kapat</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hedef yok.</td></tr>'
+    }</tbody></table>
+    <h3>Hedef ekle</h3>
+    <div class="grid k2">
+      <div><label>Dış ID (chat/kanal id)</label><input id="t-ext" type="text" placeholder="-100…"></div>
+      <div><label>Başlık</label><input id="t-title" type="text"></div>
+      <div><label>Tür</label><select id="t-type"><option>Channel</option><option>Group</option><option>Profile</option><option>Feed</option></select></div>
+      <div><label>Rol</label><select id="t-role"><option value="Editorial">Editorial (normal yayın)</option><option value="Test">Test (deneme)</option><option value="AdminInbox">AdminInbox (girdi — yayın almaz)</option></select></div>
+      <div><label>Kategori (bu hedef hangi kategorinin içeriğini alsın)</label>${catSelect('t-cat',cl,'')}</div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn pri" id="t-add">Hedef ekle</button><button class="btn dng right" onclick="disableAccount('${id}')">Hesabı kapat</button></div>`);
+  $('#t-add').onclick=async()=>{ try{ await api(`/social-accounts/${id}/targets`,{method:'POST',body:{externalTargetId:$('#t-ext').value,type:$('#t-type').value,role:$('#t-role').value,categoryId:$('#t-cat').value||null,title:$('#t-title').value,language:null,timeZone:null,characterLimit:null}}); toast('Hedef eklendi'); accountDetail(id); }catch(e){toast(e.message,true);} };
+}
+async function disableTarget(id){ try{ await api(`/social-accounts/targets/${id}/disable`,{method:'POST'}); toast('Hedef kapatıldı'); }catch(e){toast(e.message,true);} }
+async function disableAccount(id){ if(!confirm('Hesap kapatılsın mı?'))return; try{ await api(`/social-accounts/${id}/disable`,{method:'POST'}); toast('Hesap kapatıldı'); closeModal(); route(); }catch(e){toast(e.message,true);} }
+
+/* ---------------- Yayınlar ---------------- */
+async function renderPublications(){
+  $('#view').innerHTML=head('Yayınlar','Hedef başına yayın durumu — başarısızlar yeniden denenebilir',
+    `<select id="pf" style="width:160px"><option value="">Tümü</option><option>Scheduled</option><option>Failed</option><option>Published</option><option>Pending</option><option>Skipped</option></select>`);
+  const box=document.createElement('div'); box.className='card'; $('#view').appendChild(box);
+  async function load(){ const st=$('#pf').value; const list=await api(`/publishing/publications${st?`?status=${st}`:''}`);
+    box.innerHTML=`<table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Tarih</th><th>Hata</th><th style="width:170px"></th></tr></thead><tbody>${
+      list.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td class="muted">${p.publishedAt?new Date(p.publishedAt).toLocaleString('tr'):new Date(p.createdAt).toLocaleString('tr')}</td><td class="muted" style="max-width:240px">${h(p.error||'')}</td><td class="row"><button class="btn sm" onclick="showDetail('${p.contentItemId}')">İçeriği aç</button>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
+    }</tbody></table>`; }
+  $('#pf').onchange=load; await load();
+}
+
+/* ---------------- Kullanım / Maliyet ---------------- */
+async function renderUsage(){
+  $('#view').innerHTML=head('Kullanım / Maliyet','Hangi API ne kadar kullanıldı ve kaç $ / ₺ harcandı',
+    `<select id="ud" style="width:150px"><option value="7">Son 7 gün</option><option value="30" selected>Son 30 gün</option><option value="90">Son 90 gün</option></select>`);
+  const box=document.createElement('div'); $('#view').appendChild(box);
+  async function load(){ const u=await api(`/publishing/usage?days=${$('#ud').value}`);
+    box.innerHTML=`<div class="grid k3" style="margin-bottom:14px">
+      <div class="stat"><div class="v">${money(u.totalUsd)}</div><div class="l">Toplam maliyet (USD)</div></div>
+      <div class="stat"><div class="v">${u.totalTry?('₺'+Number(u.totalTry).toFixed(2)):'—'}</div><div class="l">TL karşılığı</div></div>
+      <div class="stat"><div class="v">${u.usdToTry||'—'}</div><div class="l">USD/TRY kuru (Ayarlar)</div></div>
+    </div>
+    <div class="card"><table><thead><tr><th>Sağlayıcı</th><th>İşlem</th><th>Birim (token/görsel)</th><th>Maliyet</th></tr></thead><tbody>${
+      (u.rows||[]).map(r=>`<tr><td>${h(r.provider)}</td><td>${h(r.operation)}</td><td>${r.units.toLocaleString('tr')}</td><td>${money(r.costUsd)}</td></tr>`).join('')||'<tr><td colspan=4 class="empty">Henüz kullanım yok.</td></tr>'
+    }</tbody></table></div>`; }
+  $('#ud').onchange=load; await load();
+}
+
+/* ---------------- Ayarlar ---------------- */
+async function renderSettings(){
+  const [list, channels, health] = await Promise.all([
+    api('/settings'),
+    api('/publishing/channels').catch(()=>({available:[]})),
+    fetch('/health').then(r=>r.json()).catch(()=>null)
+  ]);
+  const known=[
+    ['OpenAI:ApiKey','OpenAI API anahtarı',true],
+    ['OpenAI:TextModel','Metin modeli (ör. gpt-4o-mini)',false],
+    ['OpenAI:ImageModel','Görsel modeli (ör. gpt-image-1)',false],
+    ['OpenAI:ImageSize','Görsel boyutu (ör. 1024x1024)',false],
+    ['Pricing:UsdToTry','USD/TRY kuru',false],
+    ['Content:DefaultLanguage','Varsayılan içerik dili (ör. tr)',false]
+  ];
+  const chips=(channels.available||[]).map(c=>`<span class="chip ok">${h(c)}</span>`).join(' ')||'<span class="chip mut">yok</span>';
+  $('#view').innerHTML=head('Ayarlar','API anahtarları ve token buradan girilir — değiştirince yeniden deploy gerekmez')+`
+    <div class="card"><h3 style="margin-top:0">Sistem durumu</h3>
+      <div class="row"><span class="muted">Durum:</span> ${health?`<span class="chip ok">${h(health.status||'ok')}</span>`:'<span class="chip dng">ulaşılamadı</span>'}
+      <span class="muted" style="margin-left:12px">Kayıtlı kanallar:</span> ${chips}</div>
+      ${health&&health.modules?`<div class="muted" style="margin-top:8px">Modüller: ${health.modules.map(h).join(', ')}</div>`:''}
+    </div>
+    <div class="card"><h3 style="margin-top:0">Hızlı ayarlar</h3>
+      ${known.map(([k,l,sec])=>`<div class="row" style="margin-bottom:10px"><div class="s-lbl muted">${h(l)}</div>
+        <input type="${sec?'password':'text'}" id="q-${k}" placeholder="${h(k)}" style="flex:1;min-width:160px">
+        <button class="btn" data-k="${k}" data-s="${sec}" data-in="q-${k}">Kaydet</button></div>`).join('')}
+    </div>
+    <div class="card"><h3 style="margin-top:0">Yeni ayar ekle (serbest)</h3>
+      <div class="row"><input type="text" id="ns-key" placeholder="Anahtar (ör. Adsgram:Token)" style="flex:1;min-width:150px">
+        <input type="text" id="ns-val" placeholder="Değer" style="flex:1;min-width:150px">
+        <label class="row" style="margin:0"><input type="checkbox" id="ns-sec" style="width:auto"> Gizli</label>
+        <button class="btn pri" id="ns-add">Ekle</button></div>
+    </div>
+    <div class="card"><h3 style="margin-top:0">Tanımlı ayarlar</h3>
+      <table><thead><tr><th>Anahtar</th><th>Değer</th><th>Gizli</th><th>Güncelleme</th></tr></thead><tbody>${
+        list.map(s=>`<tr><td>${h(s.key)}</td><td class="muted">${h(s.maskedValue)}</td><td>${s.isSecret?'🔒':''}</td><td class="muted">${s.updatedAt?new Date(s.updatedAt).toLocaleString('tr'):''}</td></tr>`).join('')||'<tr><td colspan=4 class="empty">Ayar yok.</td></tr>'
+      }</tbody></table>
+    </div>`;
+  $('#ns-add').onclick=async()=>{ const k=$('#ns-key').value.trim(),v=$('#ns-val').value; if(!k||!v)return toast('Anahtar ve değer gerekli',true);
+    try{ await api('/settings',{method:'PUT',body:{key:k,value:v,isSecret:$('#ns-sec').checked}}); toast('Kaydedildi'); route(); }catch(e){toast(e.message,true);} };
+  $('#view').addEventListener('click',async e=>{ if(e.target.dataset.k){ const k=e.target.dataset.k,sec=e.target.dataset.s==='true',v=$('#'+e.target.dataset.in).value;
+    if(!v)return toast('Değer boş',true); try{ await api('/settings',{method:'PUT',body:{key:k,value:v,isSecret:sec}}); toast('Kaydedildi'); route(); }catch(e){toast(e.message,true);} } });
+}
+
+/* Mobil çekmece */
+(function(){
+  const side=$('.side'), scrim=$('#scrim');
+  const drawer=o=>{ side.classList.toggle('open',o); scrim.classList.toggle('on',o); };
+  $('#menuBtn').onclick=()=>drawer(true);
+  scrim.onclick=()=>drawer(false);
+  $('#nav').addEventListener('click',e=>{ if(e.target.closest('a')) drawer(false); });
+})();
+
+/* Giriş / oturum */
+function showLogin(){ $('#login').classList.add('on'); }
+function hideLogin(){ $('#login').classList.remove('on'); }
+$('#logout').onclick=e=>{ e.preventDefault(); setToken(null); showLogin(); };
+$('#loginForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const err=$('#lg-err'); err.style.display='none';
+  try{
+    const r=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:$('#lg-u').value.trim(),password:$('#lg-p').value})});
+    if(!r.ok) throw 0;
+    const d=await r.json(); setToken(d.token); hideLogin(); if(!location.hash) location.hash='#dashboard'; route();
+  }catch{ err.textContent='E-posta veya şifre hatalı'; err.style.display='block'; }
+});
+async function boot(){
+  if(!getToken()){ showLogin(); return; }
+  try{ await api('/auth/me'); route(); }catch{ showLogin(); }
+}
+boot();
+</script>
+</body>
+</html>

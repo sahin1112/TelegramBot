@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ContentPlatform.Ingestion.Contracts</RootNamespace>
+    <AssemblyName>ContentPlatform.Ingestion.Contracts</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Shared\ContentPlatform.Abstractions\ContentPlatform.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

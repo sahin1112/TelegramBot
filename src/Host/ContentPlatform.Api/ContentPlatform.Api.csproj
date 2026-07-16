@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>ContentPlatform.Api</RootNamespace>
+    <AssemblyName>ContentPlatform.Api</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\ContentPlatform.SharedKernel\ContentPlatform.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Shared\ContentPlatform.Abstractions\ContentPlatform.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Contexts\Ingestion\ContentPlatform.Ingestion\ContentPlatform.Ingestion.csproj" />
+    <ProjectReference Include="..\..\Contexts\Editorial\ContentPlatform.Editorial\ContentPlatform.Editorial.csproj" />
+    <ProjectReference Include="..\..\Contexts\Publishing\ContentPlatform.Publishing\ContentPlatform.Publishing.csproj" />
+    <ProjectReference Include="..\..\Contexts\Site\ContentPlatform.Site\ContentPlatform.Site.csproj" />
+    <ProjectReference Include="..\..\Contexts\Platform\ContentPlatform.Platform\ContentPlatform.Platform.csproj" />
+  </ItemGroup>
+</Project>
