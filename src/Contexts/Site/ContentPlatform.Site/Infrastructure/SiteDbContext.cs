@@ -8,6 +8,7 @@ public sealed class SiteDbContext(DbContextOptions<SiteDbContext> options) : DbC
     public const string Schema = "site";
 
     public DbSet<BlogPost> BlogPosts => Set<BlogPost>();
+    public DbSet<Comment> Comments => Set<Comment>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -30,6 +31,19 @@ public sealed class SiteDbContext(DbContextOptions<SiteDbContext> options) : DbC
                 .HasConversion(
                     v => string.Join('\n', v),
                     v => v.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList());
+        });
+
+        b.Entity<Comment>(e =>
+        {
+            e.ToTable("comments");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.BlogPostId, x.Status });
+            e.HasIndex(x => x.Status);
+            e.Property(x => x.AuthorName).IsRequired().HasMaxLength(80);
+            e.Property(x => x.AuthorEmail).HasMaxLength(200);
+            e.Property(x => x.Body).IsRequired().HasMaxLength(4000);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.IpHash).IsRequired().HasMaxLength(64);
         });
     }
 }

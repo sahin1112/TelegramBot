@@ -31,10 +31,17 @@ internal sealed class ContentRepository(EditorialDbContext db) : IContentReposit
             .Where(x => x.MediaStatus == Domain.MediaStatus.AwaitingManualUpload)
             .OrderBy(x => x.CreatedAt).Take(take).ToListAsync(ct);
 
-    public async Task<(IReadOnlyList<ContentItem> Items, int Total)> GetPagedAsync(Domain.EditorialStatus? status, int page, int size, CancellationToken ct)
+    public async Task<(IReadOnlyList<ContentItem> Items, int Total)> GetPagedAsync(Domain.EditorialStatus? status, string? search, int page, int size, CancellationToken ct)
     {
         var q = db.ContentItems.Include(x => x.Revisions).AsQueryable();
         if (status is { } s) q = q.Where(x => x.EditorialStatus == s);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            q = q.Where(x =>
+                (x.RawTitle != null && x.RawTitle.Contains(term)) ||
+                x.Revisions.Any(r => r.IsCurrent && r.Title.Contains(term)));
+        }
         var total = await q.CountAsync(ct);
         var items = await q.OrderByDescending(x => x.CreatedAt)
             .Skip(Math.Max(0, page - 1) * size).Take(size).ToListAsync(ct);

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using ContentPlatform.Abstractions;
 using ContentPlatform.Api.Auth;
 using ContentPlatform.SharedKernel;
@@ -12,8 +13,12 @@ builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configurati
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddIntegrationEventBus();
 
+// Enum'lar JSON'da string olarak okunur/yazılır (panel "Telegram", "SkiaCard" vb. gönderir/bekler).
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
 // -------- Kimlik doğrulama (tek kullanıcı admin) --------
-builder.Services.AddDataProtection();
+// NOT: Data Protection, PlatformModule içinde (Api+Worker ORTAK, sabit klasör) yapılandırılır.
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<AuthTokenService>();

@@ -71,6 +71,18 @@ public sealed class Publication : Entity
         Touch(clock);
     }
 
+    /// <summary>
+    /// Kill-switch yüzünden gönderilmedi: Failed sayılmaz, "Scheduled/hemen due" olarak bekletilir;
+    /// fren kalkınca ScheduledDispatchJob yeniden dener. Deneme sayacı artmaz.
+    /// </summary>
+    public void HoldForKillSwitch(IClock clock)
+    {
+        if (Status == PublicationStatus.Published) return;
+        Status = PublicationStatus.Scheduled;
+        ScheduledAt = clock.UtcNow;
+        Touch(clock);
+    }
+
     /// <summary>Planlı/başarısız yayını iptal et (bir daha denenmez).</summary>
     public void Cancel(IClock clock)
     {

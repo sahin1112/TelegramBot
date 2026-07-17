@@ -16,11 +16,20 @@ public sealed class DistributionService(
     IChannelPublisherRegistry registry,
     IMediaReader mediaReader,
     IIntegrationEventPublisher bus,
+    IKillSwitch killSwitch,
     IClock clock,
     ILogger<DistributionService> logger)
 {
     public async Task<bool> PublishOneAsync(Publication pub, CancellationToken ct)
     {
+        // Acil durdurma: fren çekiliyse gönderme; Failed sayma, beklet (fren kalkınca dispatch dener).
+        if (await killSwitch.IsPublishingStoppedAsync(ToPlatform(pub.Channel), pub.CategoryId, pub.SocialAccountId, ct))
+        {
+            pub.HoldForKillSwitch(clock);
+            logger.LogWarning("Yayın durduruldu (kill-switch): kanal={Channel} hedef={Target}", pub.Channel, pub.TargetRef);
+            return false;
+        }
+
         if (!registry.Supports(pub.Channel)) { pub.MarkFailed("Adaptör yok", clock); return false; }
 
         var credentials = await credentialProvider.GetAsync(pub.SocialAccountId, ct);
@@ -51,4 +60,13 @@ public sealed class DistributionService(
         logger.LogWarning("Yayın hatası: hedef={Target} deneme={Attempts} hata={Error}", pub.TargetRef, pub.Attempts, result.Error?.Message);
         return false;
     }
+
+    private static Platform ToPlatform(Channel c) => c switch
+    {
+        Channel.Telegram => Platform.Telegram,
+        Channel.X => Platform.X,
+        Channel.Instagram => Platform.Instagram,
+        Channel.Threads => Platform.Threads,
+        _ => Platform.Telegram
+    };
 }

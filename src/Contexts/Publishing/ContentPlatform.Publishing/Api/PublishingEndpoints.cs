@@ -20,12 +20,13 @@ internal static class PublishingEndpoints
         g.MapGet("/usage", async (int? days, UsageService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAsync(days ?? 30, ct)));
 
-        // Yayın listesi (içeriğe / duruma göre)
-        g.MapGet("/publications", async (Guid? contentItemId, string? status, IPublicationRepository repo, CancellationToken ct) =>
+        // Yayın listesi (içeriğe / duruma / aramaya göre, sayfalı)
+        g.MapGet("/publications", async (Guid? contentItemId, string? status, string? q, int? page, int? size, IPublicationRepository repo, CancellationToken ct) =>
         {
             PublicationStatus? st = Enum.TryParse<PublicationStatus>(status, true, out var s) ? s : null;
-            var list = await repo.ListAsync(contentItemId, st, 100, ct);
-            return Results.Ok(list.Select(Dto));
+            var p = page ?? 1; var sz = contentItemId is null ? (size ?? 25) : 200; // içerik detayında hepsi
+            var (items, total) = await repo.ListPagedAsync(contentItemId, st, q, p, sz, ct);
+            return Results.Ok(new { items = items.Select(Dto), page = p, size = sz, total });
         });
 
         // Yayın detayı (deneme geçmişiyle)

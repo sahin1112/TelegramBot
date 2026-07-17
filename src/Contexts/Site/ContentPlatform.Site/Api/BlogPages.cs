@@ -39,6 +39,12 @@ internal static class BlogPages
     .related{border-top:1px solid var(--line);margin-top:34px;padding-top:18px}
     footer.site{border-top:1px solid var(--line);margin-top:40px;padding:24px 0;color:var(--muted);font-size:14px}
     .pager{display:flex;justify-content:space-between;margin:24px 0}
+    .comment{border-top:1px solid var(--line);padding:12px 0}
+    .comment .who{font-weight:600}
+    form.cmt{display:flex;flex-direction:column;gap:8px;max-width:520px;margin-top:12px}
+    form.cmt input,form.cmt textarea{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+    form.cmt textarea{min-height:90px;resize:vertical}
+    form.cmt button{align-self:flex-start;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 18px;cursor:pointer;font:inherit}
     """;
 
     private static string Layout(SiteOptions o, string headExtra, string bodyInner)
@@ -98,7 +104,7 @@ internal static class BlogPages
         return Layout(o, head, body.ToString());
     }
 
-    public static string Post(SiteOptions o, BlogPostView p, IReadOnlyList<BlogListItem> related)
+    public static string Post(SiteOptions o, BlogPostView p, IReadOnlyList<BlogListItem> related, IReadOnlyList<CommentView> comments, bool submitted)
     {
         var path = $"/blog/{p.Slug}";
         var jsonLd = ArticleJsonLd(o, p);
@@ -123,6 +129,7 @@ internal static class BlogPages
             body.Append(Cards(o, related));
             body.Append("</section>");
         }
+        body.Append(CommentsSection(p.Slug, comments, submitted));
         return Layout(o, head, body.ToString());
     }
 
@@ -137,6 +144,25 @@ internal static class BlogPages
     {
         var head = $"<title>Bulunamadı — {Enc(o.SiteName)}</title><meta name=\"robots\" content=\"noindex\">";
         return Layout(o, head, "<h1>Sayfa bulunamadı</h1><p><a href=\"/blog\">Bloga dön</a></p>");
+    }
+
+    private static string CommentsSection(string slug, IReadOnlyList<CommentView> comments, bool submitted)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"<section id=\"comments\" class=\"related\"><h2>Yorumlar ({comments.Count})</h2>");
+        if (submitted)
+            sb.Append("<p style=\"color:var(--accent);font-weight:600\">Yorumun alındı; onaylandıktan sonra görünecek.</p>");
+        if (comments.Count == 0)
+            sb.Append("<p class=\"meta\">İlk yorumu sen yaz.</p>");
+        else
+            foreach (var c in comments)
+                sb.Append($"<div class=\"comment\"><div class=\"who\">{Enc(c.AuthorName)} <span class=\"meta\">· {c.CreatedAt.ToLocalTime():dd MMMM yyyy}</span></div><p>{Enc(c.Body)}</p></div>");
+        sb.Append($"<h3>Yorum yaz</h3><form class=\"cmt\" method=\"post\" action=\"/blog/{Enc(Uri.EscapeDataString(slug))}/comment\">");
+        sb.Append("<input name=\"name\" maxlength=\"80\" placeholder=\"Adın\" required>");
+        sb.Append("<input name=\"email\" type=\"email\" maxlength=\"200\" placeholder=\"E-posta (opsiyonel, yayınlanmaz)\">");
+        sb.Append("<textarea name=\"body\" maxlength=\"4000\" placeholder=\"Yorumun…\" required></textarea>");
+        sb.Append("<button type=\"submit\">Gönder</button></form></section>");
+        return sb.ToString();
     }
 
     private static string Cards(SiteOptions o, IReadOnlyList<BlogListItem> posts)

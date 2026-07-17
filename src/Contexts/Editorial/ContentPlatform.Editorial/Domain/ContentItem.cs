@@ -45,7 +45,8 @@ public sealed class ContentItem : Entity
         // Girdi tipine göre başlangıç durumu (bkz. 00 §7).
         EditorialStatus = origin switch
         {
-            ContentOrigin.Rss or ContentOrigin.WebPage => EditorialStatus.PendingReview,
+            // RSS/sayfa → önce TASLAK (ham). İçerik üretilip "Onaya gönder" ile onay kuyruğuna (PendingReview) taşınır.
+            ContentOrigin.Rss or ContentOrigin.WebPage => EditorialStatus.Draft,
             ContentOrigin.Manual or ContentOrigin.ManualNoAi => EditorialStatus.Approved, // güvenilir → otomatik onaylı
             _ => EditorialStatus.Draft // TelegramAdmin -> taslak (ReviewDraft)
         };
@@ -123,6 +124,29 @@ public sealed class ContentItem : Entity
     {
         TestMode = testMode;
         Touch(clock);
+    }
+
+    /// <summary>İçeriği onay kuyruğuna (PendingReview) al — otomatik yayınlanmaz; önce üret/gözden geçir.</summary>
+    public void ReturnToReview(IClock clock)
+    {
+        EditorialStatus = EditorialStatus.PendingReview;
+        Touch(clock);
+    }
+
+    /// <summary>
+    /// Taslağı ONAYA gönderir (Draft → PendingReview). Yalnız güncel bir revizyon (üretilmiş/düzenlenmiş içerik)
+    /// varsa geçer — ham/boş taslak onaya gönderilemez.
+    /// </summary>
+    public Result SubmitForReview(IClock clock)
+    {
+        if (EditorialStatus is not EditorialStatus.Draft)
+            return Result.Failure(ContentPlatform.SharedKernel.Error.Conflict($"Onaya gönderilecek durumda değil: {EditorialStatus}."));
+        if (!_revisions.Any(r => r.IsCurrent))
+            return Result.Failure(ContentPlatform.SharedKernel.Error.Validation("Önce içeriği üretin/düzenleyin (güncel revizyon yok)."));
+        EditorialStatus = EditorialStatus.PendingReview;
+        Error = null;
+        Touch(clock);
+        return Result.Success();
     }
 
     /// <summary>Elle yayın zamanı belirle (null → kategori politikası / hemen).</summary>

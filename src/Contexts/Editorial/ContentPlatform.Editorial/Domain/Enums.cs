@@ -16,3 +16,6 @@ public enum EditorialStatus { Discovered, PendingReview, Draft, Approved, Publis
 public enum MediaStatus { NotRequired, Pending, AwaitingManualUpload, Ready, Failed }
 
 public enum ActorType { AdminUser, TelegramMember, System }
+
+/// <summary>İçerik yaşam döngüsü olayları (izlenebilirlik / ContentAudit, 00 §19).</summary>
+public enum AuditEvent { Created, Approved, Rejected, Edited, Generated, HeldForReview, Retracted, Published }

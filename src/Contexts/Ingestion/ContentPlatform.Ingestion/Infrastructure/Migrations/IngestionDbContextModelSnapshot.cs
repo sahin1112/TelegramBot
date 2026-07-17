@@ -63,6 +63,9 @@ namespace ContentPlatform.Ingestion.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("IngestSince")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 

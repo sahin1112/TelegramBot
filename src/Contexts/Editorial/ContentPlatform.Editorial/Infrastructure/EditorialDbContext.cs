@@ -10,6 +10,7 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
     public DbSet<ContentRevision> ContentRevisions => Set<ContentRevision>();
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
+    public DbSet<ContentAuditEntry> ContentAudit => Set<ContentAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -19,6 +20,7 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
         {
             e.ToTable("content_items");
             e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();   // Id domain'de (Guid.NewGuid) atanır; EF üretmez.
             e.Property(x => x.SourceHash).IsRequired().HasMaxLength(128);
             e.HasIndex(x => x.SourceHash).IsUnique();            // dedup
             e.Property(x => x.CreatedByRef).IsRequired().HasMaxLength(200);
@@ -39,6 +41,8 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
         {
             e.ToTable("content_revisions");
             e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();   // ← "0 satır etkilendi" hatasının kök çözümü:
+            // Id boş değil (domain'de atanıyor); EF bunu "var olan kayıt" sanıp UPDATE etmesin, INSERT etsin.
             e.Property(x => x.Title).IsRequired().HasMaxLength(300);
             e.Property(x => x.ShortX).HasMaxLength(400);
             e.Property(x => x.Tags)
@@ -52,8 +56,21 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
         {
             e.ToTable("media_assets");
             e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();
             e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Url).IsRequired().HasMaxLength(1000);
+        });
+
+        b.Entity<ContentAuditEntry>(e =>
+        {
+            e.ToTable("content_audit");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.HasIndex(x => new { x.ContentItemId, x.CreatedAt });
+            e.Property(x => x.Event).HasConversion<string>().HasMaxLength(24);
+            e.Property(x => x.ActorType).HasConversion<string>().HasMaxLength(24);
+            e.Property(x => x.ActorRef).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Detail).HasMaxLength(1000);
         });
     }
 }

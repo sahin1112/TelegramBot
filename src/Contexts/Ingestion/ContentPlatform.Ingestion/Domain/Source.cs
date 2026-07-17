@@ -7,13 +7,14 @@ public sealed class Source : Entity
 {
     private Source() { } // EF
 
-    public Source(Guid? categoryId, SourceType type, string? url, int pollIntervalMinutes, string? selector, IClock clock)
+    public Source(Guid? categoryId, SourceType type, string? url, int pollIntervalMinutes, string? selector, DateTimeOffset? ingestSince, IClock clock)
     {
         CategoryId = categoryId;
         Type = type;
         Url = url;
         PollIntervalMinutes = pollIntervalMinutes < 1 ? 15 : pollIntervalMinutes;
         Selector = selector;
+        IngestSince = ingestSince;
         IsActive = true;
         CreatedAt = clock.UtcNow;
     }
@@ -26,6 +27,9 @@ public sealed class Source : Entity
     public bool IsActive { get; private set; }
     public DateTimeOffset? LastPolledAt { get; private set; }
     public string? LastItemHash { get; private set; }
+
+    /// <summary>Bu tarih-saatten ÖNCE yayınlanan öğeler alınmaz (boş = tümü). Kaynak bazlı backlog kontrolü.</summary>
+    public DateTimeOffset? IngestSince { get; private set; }
 
     public bool IsPollable => Type is SourceType.Rss or SourceType.WebPage;
 
@@ -43,12 +47,13 @@ public sealed class Source : Entity
     public void Enable(IClock clock) { IsActive = true; Touch(clock); }
     public void Disable(IClock clock) { IsActive = false; Touch(clock); }
 
-    public void Update(Guid? categoryId, string? url, int pollIntervalMinutes, string? selector, IClock clock)
+    public void Update(Guid? categoryId, string? url, int pollIntervalMinutes, string? selector, DateTimeOffset? ingestSince, IClock clock)
     {
         CategoryId = categoryId;
         Url = url;
         PollIntervalMinutes = pollIntervalMinutes < 1 ? 15 : pollIntervalMinutes;
         Selector = selector;
+        IngestSince = ingestSince;
         Touch(clock);
     }
 }

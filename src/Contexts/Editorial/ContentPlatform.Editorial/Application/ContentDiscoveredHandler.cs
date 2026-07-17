@@ -13,6 +13,7 @@ namespace ContentPlatform.Editorial.Application;
 public sealed class ContentDiscoveredHandler(
     IContentRepository repository,
     IRiskClassifier riskClassifier,
+    IContentAudit audit,
     IClock clock,
     ILogger<ContentDiscoveredHandler> logger)
     : IIntegrationEventHandler<ContentDiscoveredIntegrationEvent>
@@ -40,6 +41,7 @@ public sealed class ContentDiscoveredHandler(
             clock: clock);
 
         await repository.AddAsync(item, ct);
+        audit.Log(item.Id, AuditEvent.Created, ActorType.System, item.CreatedByRef, $"Kaynak: {origin}, risk: {risk}");
         await repository.SaveChangesAsync(ct);
         logger.LogInformation("İçerik onay kuyruğuna eklendi: {Title}", e.RawTitle);
     }

@@ -26,14 +26,15 @@ internal static class BlogEndpoints
             return Results.Content(BlogPages.Home(o, posts, p, totalPages), Html);
         }).ExcludeFromDescription();
 
-        app.MapGet("/blog/{slug}", async (string slug, BlogQueryService q, IOptions<SiteOptions> opt, CancellationToken ct) =>
+        app.MapGet("/blog/{slug}", async (string slug, string? ok, BlogQueryService q, CommentService comments, IOptions<SiteOptions> opt, CancellationToken ct) =>
         {
             var o = opt.Value;
             var post = await q.BySlugAsync(slug, ct);
             if (post is null) return Results.Content(BlogPages.NotFound(o), Html, System.Text.Encoding.UTF8, 404);
             await q.IncrementViewAsync(post.Id, ct);
             var related = await q.RelatedAsync(post.Id, post.Tags, 4, ct);
-            return Results.Content(BlogPages.Post(o, post, related), Html);
+            var appr = await comments.ApprovedForPostAsync(post.Id, ct);
+            return Results.Content(BlogPages.Post(o, post, related, appr, ok == "1"), Html);
         }).ExcludeFromDescription();
 
         app.MapGet("/etiket/{tag}", async (string tag, BlogQueryService q, IOptions<SiteOptions> opt, CancellationToken ct) =>

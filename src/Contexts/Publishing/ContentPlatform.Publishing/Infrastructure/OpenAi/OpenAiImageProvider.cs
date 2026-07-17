@@ -20,14 +20,26 @@ internal sealed class OpenAiImageProvider(
     {
         var apiKey = await settings.GetAsync("OpenAI:ApiKey", ct) ?? _opt.ApiKey;
         var model = await settings.GetAsync("OpenAI:ImageModel", ct) ?? _opt.ImageModel;
+        if (string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException(
+                "OpenAI API anahtarı yok ya da çözülemedi. Uygulama yeniden başladıysa Ayarlar'dan 'OpenAI:ApiKey' değerini tekrar kaydedin.");
+
+        // Kalite ayardan gelebilir (OpenAI:ImageQuality: low/medium/high); yoksa istek varsayılanı.
+        var quality = await settings.GetAsync("OpenAI:ImageQuality", ct) ?? request.Quality;
+        var size = await settings.GetAsync("OpenAI:ImageSize", ct) ?? $"{request.Width}x{request.Height}";
 
         var client = httpClientFactory.CreateClient(OpenAiTextProvider.HttpClientName);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-        var body = new { model, prompt = request.Prompt, size = $"{request.Width}x{request.Height}", quality = request.Quality };
+        var body = new { model, prompt = request.Prompt, size, quality };
 
         using var resp = await client.PostAsJsonAsync($"{_opt.BaseUrl}/images/generations", body, ct);
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode)
+        {
+            var err = await resp.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"OpenAI {(int)resp.StatusCode} ({resp.StatusCode}) — model '{model}': {(err.Length > 400 ? err[..400] : err)}");
+        }
         using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
 

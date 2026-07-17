@@ -8,6 +8,8 @@ public interface IPublicationRepository
     Task<Publication?> FindAsync(Guid contentItemId, Channel channel, string targetRef, CancellationToken ct);
     Task<Publication?> GetAsync(Guid id, CancellationToken ct);
     Task<IReadOnlyList<Publication>> ListAsync(Guid? contentItemId, PublicationStatus? status, int take, CancellationToken ct);
+    /// <summary>Sayfalı + aramalı liste (hedef/hata metninde). Panel için.</summary>
+    Task<(IReadOnlyList<Publication> Items, int Total)> ListPagedAsync(Guid? contentItemId, PublicationStatus? status, string? search, int page, int size, CancellationToken ct);
     Task AddAsync(Publication publication, CancellationToken ct);
     Task<IReadOnlyList<Publication>> GetRetriableAsync(int maxAttempts, int take, CancellationToken ct);
     /// <summary>Zamanı gelmiş planlı yayınlar (Scheduled &amp; ScheduledAt ≤ now).</summary>

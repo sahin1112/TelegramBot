@@ -15,16 +15,27 @@ public sealed class DiscoveryService(
     IDedupStore dedup,
     IFactPackExtractor factPack,
     IIntegrationEventPublisher bus,
+    IKillSwitch killSwitch,
     IClock clock,
     ILogger<DiscoveryService> logger)
 {
     public async Task<int> DiscoverDueAsync(CancellationToken ct)
     {
+        // Acil durdurma: içe aktarma (veya global) durdurulmuşsa hiç tarama yapma.
+        if (await killSwitch.IsIngestionStoppedAsync(null, ct))
+        {
+            logger.LogWarning("İçe aktarma durduruldu (kill-switch).");
+            return 0;
+        }
+
         var due = await sources.ListDueAsync(clock.UtcNow, ct);
         var discovered = 0;
 
         foreach (var source in due)
         {
+            // Kategori bazlı durdurma: o kategorinin kaynaklarını atla.
+            if (await killSwitch.IsIngestionStoppedAsync(source.CategoryId, ct)) continue;
+
             var reader = readers.FirstOrDefault(r => r.CanRead(source.Type));
             if (reader is null) continue;
 
@@ -34,6 +45,10 @@ public sealed class DiscoveryService(
                 var items = await reader.ReadAsync(source, ct);
                 foreach (var item in items)
                 {
+                    // Kaynak bazlı başlangıç tarihi: bu tarihten ÖNCE yayınlanmış öğeleri atla (backlog gelmesin).
+                    if (source.IngestSince is { } since && item.PublishedAt is { } pub && pub < since)
+                        continue;
+
                     var hash = ComputeHash(item.Url, item.Title);
                     lastHash ??= hash;
                     if (await dedup.HasSeenAsync(hash, ct)) continue;

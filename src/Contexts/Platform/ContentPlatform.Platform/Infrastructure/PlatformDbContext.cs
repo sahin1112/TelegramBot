@@ -11,6 +11,7 @@ public sealed class PlatformDbContext(DbContextOptions<PlatformDbContext> option
     public DbSet<PublicationTarget> PublicationTargets => Set<PublicationTarget>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<KillSwitch> KillSwitches => Set<KillSwitch>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -62,6 +63,16 @@ public sealed class PlatformDbContext(DbContextOptions<PlatformDbContext> option
             e.Property(x => x.ExternalTargetId).IsRequired().HasMaxLength(128);
             e.Property(x => x.Title).HasMaxLength(200);
             e.HasIndex(x => new { x.SocialAccountId, x.ExternalTargetId }).IsUnique();
+        });
+
+        b.Entity<KillSwitch>(e =>
+        {
+            e.ToTable("kill_switches");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Scope).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Key).HasMaxLength(64);
+            e.Property(x => x.Reason).HasMaxLength(500);
+            e.HasIndex(x => new { x.Scope, x.Key }).IsUnique();
         });
     }
 }

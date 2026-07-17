@@ -71,6 +71,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
 /* Preview */
 .preview{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:12px;line-height:1.6;max-height:340px;overflow:auto}
 .preview img{max-width:100%;border-radius:8px;margin-top:8px}
+.modal img{max-width:100%;height:auto}
 .muted{color:var(--muted)}
 .s-lbl{width:180px}
 .empty{color:var(--muted);text-align:center;padding:34px}
@@ -138,7 +139,9 @@ label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
       <a href="#sources"><span class="ic">⛃</span> Kaynaklar</a>
       <a href="#accounts"><span class="ic">◎</span> Sosyal Hesaplar</a>
       <a href="#publications"><span class="ic">➤</span> Yayınlar</a>
+      <a href="#comments"><span class="ic">💬</span> Yorumlar</a>
       <a href="#usage"><span class="ic">$</span> Kullanım / Maliyet</a>
+      <a href="#kill"><span class="ic">⛔</span> Acil Durdurma</a>
       <a href="#settings"><span class="ic">⚙</span> Ayarlar</a>
       <a href="#" id="logout"><span class="ic">⎋</span> Çıkış</a>
     </nav>
@@ -160,6 +163,9 @@ const API = "/api/v1";
 const $ = (s,r=document)=>r.querySelector(s);
 const h = (s)=>String(s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => "$"+Number(n||0).toFixed(4);
+function debounce(fn,ms=350){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+// Sunucu-tarafı sayfalama çubuğu; kapsayıcıya delege ile [data-pg] tıklaması bağlanır.
+function pagerBar(total,page,size){const pages=Math.max(1,Math.ceil((total||0)/size));return `<div class="row" style="margin-top:12px;align-items:center;gap:12px"><button class="btn sm" data-pg="${page-1}" ${page<=1?'disabled':''}>← Önceki</button><span class="muted">Sayfa ${page}/${pages} · ${total||0} kayıt</span><button class="btn sm" data-pg="${page+1}" ${page>=pages?'disabled':''}>Sonraki →</button></div>`;}
 
 function getToken(){ return localStorage.getItem('cp_token'); }
 function setToken(t){ t? localStorage.setItem('cp_token',t): localStorage.removeItem('cp_token'); }
@@ -182,18 +188,20 @@ const statusChip = s => {
   return `<span class="chip ${map[s]||'mut'}">${h(s)}</span>`;
 };
 const riskBadge = r => r==='High' ? '<span class="chip dng">Yüksek risk</span>' : (r==='Medium' ? '<span class="chip warn">Orta risk</span>' : '');
+const auditLabel = e => { const m={Created:'Oluşturuldu',Approved:'Onaylandı',Rejected:'Reddedildi',Edited:'Düzenlendi',Generated:'AI üretti',HeldForReview:'İncelemeye alındı',Retracted:'Geri çekildi',Published:'Yayınlandı'}; const c={Approved:'ok',Published:'ok',Rejected:'dng',HeldForReview:'warn',Retracted:'mut'}; return `<span class="chip ${c[e]||'mut'}">${m[e]||h(e)}</span>`; };
 
 /* ---------------- Router ---------------- */
 const routes = {
   dashboard:renderDashboard, queue:renderQueue, content:renderContent, add:renderAdd,
   categories:renderCategories, scheduled:renderScheduled, pending:renderPending, sources:renderSources, accounts:renderAccounts,
-  publications:renderPublications, usage:renderUsage, settings:renderSettings
+  publications:renderPublications, comments:renderComments, usage:renderUsage, kill:renderKill, settings:renderSettings
 };
 /* Kategori önbelleği + seçici */
 let _cats=null;
 async function cats(force){ if(force) _cats=null; if(!_cats) _cats=await api('/categories').catch(()=>[]); return _cats; }
 function catSelect(id, list, sel){ return `<select id="${id}"><option value="">— kategori yok —</option>${list.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${h(c.name)}${c.isActive?'':' (kapalı)'}</option>`).join('')}</select>`; }
 function catName(list,id){ const c=list.find(x=>x.id===id); return c?c.name:'—'; }
+const VIEW_STATE={}; // sayfalı ekranların sayfa/filtre durumu: kaydet→route sonrası korunur, menüden geçişte sıfırlanır
 async function route(){
   const key=(location.hash.replace('#','')||'dashboard');
   document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+key));
@@ -203,13 +211,15 @@ async function route(){
   fresh.innerHTML='<div class="empty">Yükleniyor…</div>';
   try{ await fn(); }catch(e){ $('#view').innerHTML=`<div class="card empty">Hata: ${h(e.message)}</div>`; }
 }
-window.addEventListener('hashchange',route);
+window.addEventListener('hashchange',()=>{ for(const k in VIEW_STATE) delete VIEW_STATE[k]; route(); });
 
 function head(title,sub,right=''){ return `<div class="head"><div><h1>${h(title)}</h1>${sub?`<div class="sub">${h(sub)}</div>`:''}</div><div>${right}</div></div>`; }
+// ISO tarihi <input type="datetime-local"> değerine çevirir (yerel saat, YYYY-MM-DDTHH:mm)
+function dtLocal(iso){ if(!iso)return ''; const d=new Date(iso); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 
 /* ---------------- Dashboard ---------------- */
 async function renderDashboard(){
-  const [queue, published, usage, sources, accounts, channels, pending, catList] = await Promise.all([
+  const [queue, published, usage, sources, accounts, channels, pending, catList, kill] = await Promise.all([
     api('/editorial?status=PendingReview&size=1').catch(()=>({total:0})),
     api('/editorial?status=Published&size=1').catch(()=>({total:0})),
     api('/publishing/usage?days=30').catch(()=>({totalUsd:0,totalTry:0,rows:[]})),
@@ -217,13 +227,16 @@ async function renderDashboard(){
     api('/social-accounts').catch(()=>[]),
     api('/publishing/channels').catch(()=>({available:[]})),
     api('/editorial/pending-image').catch(()=>[]),
-    api('/categories').catch(()=>[])
+    api('/categories').catch(()=>[]),
+    api('/killswitch').catch(()=>[])
   ]);
   const activeSrc=sources.filter(s=>s.isActive).length;
   const activeAcc=accounts.filter(a=>a.status==='Active').length;
   const errAcc=accounts.filter(a=>a.status==='Error').length;
   const chips=(channels.available||[]).map(c=>`<span class="chip ok">${h(c)}</span>`).join(' ')||'<span class="chip mut">kayıtlı kanal yok</span>';
-  $('#view').innerHTML = head('Panel','Genel durum ve son 30 gün maliyeti') + `
+  const engaged=(kill||[]).filter(k=>k.engaged);
+  const killBanner=engaged.length?`<div class="card" style="border-color:var(--danger);background:rgba(239,91,107,.08)"><b style="color:var(--danger)">⛔ Acil durdurma etkin (${engaged.length})</b> — ${engaged.map(k=>h(k.scope+(k.key?(':'+k.key):''))).join(', ')}. <a href="#kill">Yönet</a></div>`:'';
+  $('#view').innerHTML = head('Panel','Genel durum ve son 30 gün maliyeti') + killBanner + `
     <div class="grid k4">
       <div class="stat"><div class="v">${queue.total??0}</div><div class="l">Onay bekleyen</div></div>
       <div class="stat"><div class="v">${published.total??0}</div><div class="l">Yayınlanan içerik</div></div>
@@ -260,7 +273,7 @@ async function renderQueue(){
       <td><input type="datetime-local" class="q-when" title="Boş = kategori kadansı / hemen"></td>
       <td class="row"><button class="btn pri sm q-ok">Onayla</button><button class="btn dng sm q-no">Reddet</button></td>
     </tr>`).join('');
-  $('#view').innerHTML = head('Onay Kuyruğu','RSS/sayfa ham içerikleri — AI onaydan sonra çalışır (maliyet kontrolü). Zaman boşsa kategori kadansına göre planlanır.',
+  $('#view').innerHTML = head('Onay Kuyruğu','Tamamlanıp "Onaya gönder" ile buraya düşen içerikler. RSS içerikleri önce Taslak olarak gelir (İçerikler → Taslak); üretip onaya gönderirsin. Zaman boşsa kategori kadansına göre planlanır.',
     `<button class="btn pri" id="bulk">Seçilenleri Onayla</button>`) +
     `<div class="card"><table><thead><tr><th style="width:30px"></th><th>İçerik</th><th style="width:200px">Görsel kaynağı</th><th style="width:70px">Mod</th><th style="width:190px">Yayın zamanı</th><th style="width:170px"></th></tr></thead>
      <tbody>${rows||'<tr><td colspan=6 class="empty">Kuyruk boş.</td></tr>'}</tbody></table></div>`;
@@ -286,63 +299,135 @@ async function renderQueue(){
 async function renderContent(){
   const statuses=['','PendingReview','Draft','Approved','Published','Failed','Archived','Rejected'];
   const sel = statuses.map(s=>`<option value="${s}">${s||'Tümü'}</option>`).join('');
-  $('#view').innerHTML = head('İçerikler','Durum filtreli liste; satıra tıkla → düzenle / önizle / yayınlar',
-    `<select id="fstatus" style="width:180px">${sel}</select>`);
+  $('#view').innerHTML = head('İçerikler','Başlıkta ara, duruma göre filtrele; satıra tıkla → düzenle / önizle / yayınlar',
+    `<div class="row"><input id="cq" type="text" placeholder="Başlıkta ara…" style="width:220px"><select id="fstatus" style="width:160px">${sel}</select></div>`);
   const box=document.createElement('div'); box.className='card'; box.id='clist'; $('#view').appendChild(box);
-  async function load(){ const st=$('#fstatus').value; const r=await api(`/editorial?size=50${st?`&status=${st}`:''}`);
-    box.innerHTML = `<table><thead><tr><th>Başlık</th><th style="width:130px">Durum</th><th style="width:120px">Medya</th><th style="width:90px">Mod</th><th style="width:160px">Tarih</th></tr></thead><tbody>${
-      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td><td>${statusChip(i.editorialStatus)}</td><td class="muted">${h(i.mediaStatus)}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||'<tr><td colspan=5 class="empty">Kayıt yok.</td></tr>'
-    }</tbody></table>`;
+  const S=VIEW_STATE.content||(VIEW_STATE.content={page:1,q:'',status:''});
+  $('#fstatus').value=S.status; $('#cq').value=S.q;
+  const SIZE=25; let page=S.page;
+  async function load(){
+    const st=$('#fstatus').value, q=$('#cq').value.trim();
+    S.page=page; S.status=st; S.q=q;
+    const r=await api(`/editorial?size=${SIZE}&page=${page}${st?`&status=${st}`:''}${q?`&q=${encodeURIComponent(q)}`:''}`);
+    box.innerHTML = `<table><thead><tr><th>Başlık</th><th style="width:120px">Durum</th><th style="width:90px">Risk</th><th style="width:110px">Medya</th><th style="width:70px">Mod</th><th style="width:150px">Tarih</th></tr></thead><tbody>${
+      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td><td>${statusChip(i.editorialStatus)}</td><td>${riskBadge(i.riskLevel)}</td><td class="muted">${h(i.mediaStatus)}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||'<tr><td colspan=6 class="empty">Kayıt yok.</td></tr>'
+    }</tbody></table>${pagerBar(r.total,r.page,r.size)}`;
     box.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>showDetail(tr.dataset.id));
   }
-  $('#fstatus').onchange=load; await load();
+  const reload=()=>{ page=1; S.page=1; load(); };
+  $('#fstatus').onchange=reload;
+  $('#cq').oninput=debounce(reload,350);
+  box.addEventListener('click',e=>{ const b=e.target.closest('[data-pg]'); if(b){ page=Math.max(1,+b.dataset.pg); load(); } });
+  await load();
 }
 
 async function showDetail(id){
   const d=await api(`/editorial/${id}`);
-  const pubs=await api(`/publishing/publications?contentItemId=${id}`).catch(()=>[]);
+  const pubsResp=await api(`/publishing/publications?contentItemId=${id}`).catch(()=>({items:[]}));
+  const pubs=pubsResp.items||[];
+  const auditLog=await api(`/editorial/${id}/audit`).catch(()=>[]);
   const cl=await cats();
+  const fLbl=(t,f)=>`<div class="row" style="justify-content:space-between;margin:10px 0 5px"><label style="margin:0">${t}</label><button type="button" class="btn gho sm gen-f" data-f="${f}" title="Bu alanı AI ile üret">✨ AI</button></div>`;
   openModal(`
     <span class="x" onclick="closeModal()">×</span>
     <h2>${h(d.title||'(başlıksız)')}</h2>
     <div class="muted" style="margin-bottom:10px">${statusChip(d.editorialStatus)} ${riskBadge(d.riskLevel)} · medya: ${h(d.mediaStatus)} · görsel: ${h(d.imageSource)} · kategori: ${h(catName(cl,d.categoryId))}${d.scheduledAt?` · planlı: ${new Date(d.scheduledAt).toLocaleString('tr')}`:''} ${d.testMode?'· <span class=\"chip test\">TEST</span>':''}</div>
     ${d.holdReason?`<div class="chip dng" style="display:block;margin-bottom:10px">İncelemeye alındı — ${h(d.holdReason)}</div>`:''}
-    <div class="tabs"><button class="active" data-t="edit">Düzenle</button><button data-t="prev">Önizleme</button><button data-t="pub">Yayınlar (${pubs.length})</button></div>
+    <div class="tabs"><button class="active" data-t="edit">Düzenle</button><button data-t="prev">Önizleme</button><button data-t="pub">Yayınlar (${pubs.length})</button><button data-t="audit">Zaman çizelgesi (${auditLog.length})</button></div>
     <div id="tab-edit">
-      <label>Başlık</label><input id="e-title" type="text" value="${h(d.title)}">
-      <label>Kısa (X) — satır sonları korunur</label><textarea id="e-short">${h(d.shortX)}</textarea>
-      <label>Ana metin (blog/HTML) — paragraflar korunur</label><textarea id="e-body" style="min-height:150px">${h(d.bodyHtml)}</textarea>
-      <label>Instagram açıklaması</label><textarea id="e-ig">${h(d.instagramCaption)}</textarea>
-      <label>Etiketler (virgülle)</label><input id="e-tags" type="text" value="${h((d.tags||[]).join(', '))}">
+      <div class="card" style="background:var(--panel2);margin-bottom:14px">
+        <div class="row" style="justify-content:space-between"><b>✨ AI ile üret</b><button class="btn pri sm" id="gen-all">Tüm alanları üret</button></div>
+        <label>Kaynak metin (AI'a gidecek — düzenleyebilirsin)</label>
+        <textarea id="e-seed" style="min-height:80px" placeholder="RSS/kaynak metni. Boşsa kayıtlı ham metin kullanılır.">${h(d.rawInput||'')}</textarea>
+        <div class="muted" style="font-size:11px">"Tüm alanları üret" bu metinden başlık/kısa/gövde/IG/etiket üretir → yeni revizyon. Tek alan için kutuların yanındaki ✨ düğmesini kullan.</div>
+      </div>
+      ${fLbl('Başlık','title')}<input id="e-title" type="text" value="${h(d.title)}">
+      ${fLbl('Kısa (X) — satır sonları korunur','shortX')}<textarea id="e-short">${h(d.shortX)}</textarea>
+      ${fLbl('Ana metin (blog/HTML) — paragraflar korunur','bodyHtml')}<textarea id="e-body" style="min-height:150px">${h(d.bodyHtml)}</textarea>
+      ${fLbl('Instagram açıklaması','instagramCaption')}<textarea id="e-ig">${h(d.instagramCaption)}</textarea>
+      ${fLbl('Etiketler (virgülle)','tags')}<input id="e-tags" type="text" value="${h((d.tags||[]).join(', '))}">
+      <div class="card" style="background:var(--panel2);margin-top:14px">
+        <div class="row" style="justify-content:space-between"><b>🖼️ Görsel</b>
+          <div class="row" style="margin:0">
+            <select id="e-imgsrc" style="width:auto">
+              <option value="SkiaCard">SkiaCard (başlık kartı)</option>
+              <option value="Ai">AI görsel</option>
+              <option value="Manual">Ben yükleyeceğim</option>
+            </select>
+            <button class="btn pri sm" id="e-imggen">Görseli üret</button>
+          </div>
+        </div>
+        <div id="e-imgupload" class="row" style="display:none;margin-top:8px"><input type="file" id="e-imgfile" accept="image/*"><button class="btn sm" id="e-imgup">Yükle</button></div>
+        <div id="e-imgprev" style="margin-top:10px">${d.mediaUrl?`<img src="${h(d.mediaUrl)}" alt="görsel" style="max-width:340px;border-radius:8px;display:block">`:'<span class="muted">Henüz görsel yok.</span>'}</div>
+        <div class="muted" style="font-size:11px;margin-top:6px">Görsel burada anlık üretilir/önizlenir (yayınlamaz). SkiaCard ücretsiz, AI görsel ücretlidir.</div>
+      </div>
       <div class="row" style="margin-top:14px">
         <button class="btn pri" id="e-save">Kaydet (yeni revizyon)</button>
+        ${d.editorialStatus==='Draft'?'<button class="btn pri" id="e-submit" title="İçerik hazırsa onay kuyruğuna gönder">✓ Onaya gönder</button>':''}
         ${d.mediaStatus==='Ready'&&d.editorialStatus!=='Published'?'<button class="btn" id="e-publish">Yayınla</button>':''}
         <label class="row" style="margin:0"><input type="checkbox" id="e-test" ${d.testMode?'checked':''} style="width:auto"> Test modu</label>
         <button class="btn dng right" id="e-retract">Geri çek</button>
       </div>
     </div>
     <div id="tab-prev" style="display:none">
-      ${d.mediaUrl?`<img src="${h(d.mediaUrl)}" alt="görsel">`:''}
-      <div class="preview" style="margin-top:10px">${h(d.shortX||d.bodyHtml||'')}</div>
+      <h2 style="margin:6px 0 10px;font-size:20px">${h(d.title||'(başlıksız)')}</h2>
+      ${d.mediaUrl?`<img src="${h(d.mediaUrl)}" alt="görsel" style="max-width:100%;max-height:420px;border-radius:10px;display:block;margin-bottom:12px">`:'<div class="muted" style="margin-bottom:10px">Görsel yok.</div>'}
+      <div class="preview" style="white-space:normal">${d.bodyHtml||'<span class="muted">Gövde yok.</span>'}</div>
+      <div class="muted" style="font-size:12px;margin:14px 0 4px">X (Twitter)</div>
+      <div class="preview">${h(d.shortX||'—')}</div>
+      <div class="muted" style="font-size:12px;margin:12px 0 4px">Instagram</div>
+      <div class="preview">${h(d.instagramCaption||'—')}</div>
     </div>
     <div id="tab-pub" style="display:none">
       <table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th>Deneme</th><th></th></tr></thead><tbody>${
         pubs.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=5 class="empty">Henüz yayın yok.</td></tr>'
       }</tbody></table>
+    </div>
+    <div id="tab-audit" style="display:none">
+      <table><thead><tr><th style="width:170px">Zaman</th><th>Olay</th><th>Kim</th><th>Ayrıntı</th></tr></thead><tbody>${
+        auditLog.map(a=>`<tr><td class="muted">${new Date(a.at).toLocaleString('tr')}</td><td>${auditLabel(a.event)}</td><td class="muted">${h(a.actorRef)}</td><td class="muted">${h(a.detail||'')}</td></tr>`).join('')||'<tr><td colspan=4 class="empty">Kayıt yok.</td></tr>'
+      }</tbody></table>
     </div>`);
   $('#modal').querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
     $('#modal').querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
-    ['edit','prev','pub'].forEach(t=>$('#tab-'+t).style.display=(t===b.dataset.t?'block':'none'));
+    ['edit','prev','pub','audit'].forEach(t=>$('#tab-'+t).style.display=(t===b.dataset.t?'block':'none'));
   });
+  // ✨ AI: tüm alanları üret (yeni revizyon) → yeniden yükle
+  $('#gen-all').onclick=async()=>{ const b=$('#gen-all'); b.disabled=true; b.textContent='Üretiliyor…';
+    try{ await api(`/editorial/${id}/generate`,{method:'POST',body:{seedInput:$('#e-seed').value||null}}); toast('AI üretti — revizyon oluşturuldu'); showDetail(id); }
+    catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Tüm alanları üret'; } };
+  // ✨ AI: tek alan üret (kutuya doldur, kaydetmez)
+  const fmap={title:'#e-title',shortX:'#e-short',bodyHtml:'#e-body',instagramCaption:'#e-ig',tags:'#e-tags'};
+  $('#modal').querySelectorAll('.gen-f').forEach(b=>b.onclick=async()=>{ const f=b.dataset.f, orig=b.textContent; b.disabled=true; b.textContent='…';
+    try{ const r=await api('/editorial/generate-field',{method:'POST',body:{field:f,
+        title:$('#e-title').value, shortX:$('#e-short').value, bodyHtml:$('#e-body').value,
+        instagramCaption:$('#e-ig').value, rawInput:$('#e-seed').value}});
+      const el=$(fmap[f]); if(el){ el.value=r.value; } toast('Üretildi'); }
+    catch(e){ toast(e.message,true); }
+    finally{ b.disabled=false; b.textContent=orig; } });
   $('#e-save').onclick=async()=>{
     const body={ title:$('#e-title').value, shortX:$('#e-short').value, bodyHtml:$('#e-body').value,
       instagramCaption:$('#e-ig').value, tags:$('#e-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
       primaryKeyword:null, imageAltText:null };
     try{ await api(`/editorial/${id}/revision`,{method:'PUT',body}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);}
   };
+  const subBtn=$('#e-submit'); if(subBtn) subBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/submit-review`,{method:'POST'}); toast('Onaya gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
   const pubBtn=$('#e-publish'); if(pubBtn) pubBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/publish`,{method:'POST'}); toast('Yayına gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
   $('#e-test').onchange=async(ev)=>{ try{ await api(`/editorial/${id}/testmode`,{method:'POST',body:{enabled:ev.target.checked}}); toast('Test modu güncellendi'); }catch(e){toast(e.message,true);} };
   $('#e-retract').onclick=async()=>{ if(!confirm('Geri çekilsin mi?'))return; try{ await api(`/editorial/${id}/retract`,{method:'POST'}); toast('Geri çekildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
+  // 🖼️ Görsel: kaynak seç + anlık üret/yükle + önizleme (yayınlamaz)
+  const imgSrc=$('#e-imgsrc');
+  if(imgSrc){
+    imgSrc.value=d.imageSource||'SkiaCard';
+    const syncImg=()=>{ const man=imgSrc.value==='Manual'; $('#e-imgupload').style.display=man?'flex':'none'; $('#e-imggen').style.display=man?'none':'inline-block'; };
+    imgSrc.onchange=syncImg; syncImg();
+    $('#e-imggen').onclick=async()=>{ const b=$('#e-imggen'); b.disabled=true; b.textContent='Üretiliyor…';
+      try{ await api(`/editorial/${id}/preview-image`,{method:'POST',body:{imageSource:imgSrc.value}}); toast('Görsel üretildi'); showDetail(id); }
+      catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Görseli üret'; } };
+    $('#e-imgup').onclick=async()=>{ const f=$('#e-imgfile').files[0]; if(!f)return toast('Önce dosya seç',true);
+      const fd=new FormData(); fd.append('file',f);
+      try{ await api(`/editorial/${id}/preview-image/upload`,{method:'POST',body:fd}); toast('Görsel yüklendi'); showDetail(id); }catch(e){toast(e.message,true);} };
+  }
 }
 async function retryPub(id){ try{ const r=await api(`/publishing/publications/${id}/retry`,{method:'POST'}); toast(r.published?'Yayınlandı':'Tekrar denendi'); }catch(e){toast(e.message,true);} }
 
@@ -354,11 +439,15 @@ async function renderAdd(){
       <div class="tabs"><button class="active" data-t="ai">AI ile üret</button><button data-t="noai">AI'sız (bitmiş metin)</button></div>
       <div id="add-ai">
         <label>Başlık / konu</label><input id="a-title" type="text" placeholder="Kısa başlık ya da konu">
-        <label>Kaynak metin (yapıştır) — paragraflar korunur</label><textarea id="a-raw" style="min-height:150px"></textarea>
+        <label>Kaynak metin (yapıştır — bir iki paragraf yeter) — paragraflar korunur</label><textarea id="a-raw" style="min-height:150px" placeholder="Metni buraya yapıştır. AI bundan özgün başlık, kısa (X), ana metin, IG açıklaması ve etiketleri üretir."></textarea>
         <label>Kategori</label>${catSelect('a-cat',cl,'')}
         ${imgAndOpts('a')}
         <label>Yayın zamanı (boş = kategori kadansı / hemen)</label><input type="datetime-local" id="a-when">
-        <button class="btn pri" style="margin-top:12px" id="a-save">Ekle → AI üretsin</button>
+        <div class="row" style="margin-top:12px">
+          <button class="btn pri" id="a-gen">✨ Üret ve önizle</button>
+          <button class="btn" id="a-save">Ekle → arka planda üret</button>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:6px">"Üret ve önizle": AI hemen üretir, önizleme açılır, gözden geçirip onaylarsın (otomatik yayınlanmaz). "Arka planda üret": onaya düşer, Worker üretir.</div>
       </div>
       <div id="add-noai" style="display:none">
         <label>Başlık</label><input id="n-title" type="text">
@@ -376,6 +465,15 @@ async function renderAdd(){
     $('#view').querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     $('#add-ai').style.display=b.dataset.t==='ai'?'block':'none'; $('#add-noai').style.display=b.dataset.t==='noai'?'block':'none';
   });
+  $('#a-gen').onclick=async()=>{ const raw=$('#a-raw').value.trim(); if(!raw) return toast('Önce bir metin yapıştır',true);
+    const b=$('#a-gen'); b.disabled=true; b.textContent='Üretiliyor…';
+    try{ const r=await api('/editorial/manual-generate',{method:'POST',body:{title:$('#a-title').value,rawInput:raw,
+        categoryId:$('#a-cat').value||null,imageSource:$('#a-img').value,testMode:$('#a-test').checked,
+        scheduledAt:$('#a-when').value?new Date($('#a-when').value).toISOString():null}});
+      if(r.ok){ toast('AI üretti — önizleme açılıyor'); } else { toast(r.message||'Üretim başarısız (anahtar?)',true); }
+      showDetail(r.id); }
+    catch(e){ toast(e.message,true); }
+    finally{ b.disabled=false; b.textContent='✨ Üret ve önizle'; } };
   $('#a-save').onclick=async()=>{
     try{ await api('/editorial/manual',{method:'POST',body:{title:$('#a-title').value,rawInput:$('#a-raw').value,
       categoryId:$('#a-cat').value||null,imageSource:$('#a-img').value,testMode:$('#a-test').checked,
@@ -505,21 +603,24 @@ async function renderSources(){
         <div><label>URL</label><input id="s-url" type="text" placeholder="https://…/feed"></div>
         <div><label>Tarama (dk)</label><input id="s-int" type="number" value="15"></div>
         <div><label>Kategori</label>${catSelect('s-cat',cl,'')}</div>
+        <div><label>Başlangıç tarihi (boş = tümü)</label><input id="s-since" type="datetime-local" title="Bu tarih-saatten önce yayınlanan öğeler çekilmez"></div>
       </div>
       <div class="row" style="margin-top:10px"><button class="btn" id="s-test">Test et</button><button class="btn pri" id="s-add">Ekle</button></div>
       <div id="s-testout"></div>
     </div>
     <div class="card">
-      <div class="row" style="margin-bottom:10px"><label style="margin:0">Kategoriye göre:</label><select id="s-filter" style="width:auto"><option value="">Tümü</option>${cl.map(c=>`<option value="${c.id}">${h(c.name)}</option>`).join('')}</select></div>
+      <div class="row" style="margin-bottom:10px"><input id="s-search" type="text" placeholder="URL / tür ara…" style="width:220px"><label style="margin:0">Kategoriye göre:</label><select id="s-filter" style="width:auto"><option value="">Tümü</option>${cl.map(c=>`<option value="${c.id}">${h(c.name)}</option>`).join('')}</select></div>
       <table><thead><tr><th>Tür</th><th>URL</th><th style="width:130px">Kategori</th><th style="width:70px">Aralık</th><th style="width:150px">Son tarama</th><th style="width:80px">Durum</th><th style="width:210px"></th></tr></thead><tbody id="s-rows">${
       list.map(s=>`<tr data-id="${s.id}" data-cat="${s.categoryId||''}"><td>${h(s.type)}</td><td class="muted">${h(s.url||'')}</td><td class="muted">${h(catName(cl,s.categoryId))}</td><td>${s.pollIntervalMinutes}dk</td><td class="muted">${fmt(s.lastPolledAt)}</td><td>${s.isActive?'<span class=\"chip ok\">Aktif</span>':'<span class=\"chip mut\">Kapalı</span>'}</td>
         <td class="row"><button class="btn sm s-edit">Düzenle</button><button class="btn sm s-tog">${s.isActive?'Kapat':'Aç'}</button><button class="btn dng sm s-del">Sil</button></td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kaynak yok.</td></tr>'
     }</tbody></table></div>`;
-  $('#s-add').onclick=async()=>{ try{ await api('/sources',{method:'POST',body:{categoryId:$('#s-cat').value||null,type:$('#s-type').value,url:$('#s-url').value,pollIntervalMinutes:+$('#s-int').value,selector:null}}); toast('Eklendi'); route(); }catch(e){toast(e.message,true);} };
+  $('#s-add').onclick=async()=>{ try{ await api('/sources',{method:'POST',body:{categoryId:$('#s-cat').value||null,type:$('#s-type').value,url:$('#s-url').value,pollIntervalMinutes:+$('#s-int').value,selector:null,ingestSince:$('#s-since').value?new Date($('#s-since').value).toISOString():null}}); toast('Eklendi'); route(); }catch(e){toast(e.message,true);} };
   $('#s-test').onclick=async()=>{ try{ const items=await api('/sources/test',{method:'POST',body:{type:$('#s-type').value,url:$('#s-url').value,selector:null}});
     $('#s-testout').innerHTML=`<div class="preview" style="margin-top:12px">${items.map(i=>'• '+h(i.title)).join('\n')||'Öğe bulunamadı'}</div>`; }catch(e){toast(e.message,true);} };
   $('#s-discover').onclick=async()=>{ try{ const r=await api('/sources/discover',{method:'POST'}); toast(`Tarandı — ${r.discovered} yeni öğe kuyruğa alındı`); route(); }catch(e){toast(e.message,true);} };
-  $('#s-filter').onchange=()=>{ const f=$('#s-filter').value; $('#s-rows').querySelectorAll('tr[data-id]').forEach(tr=>{ tr.style.display=(!f||tr.dataset.cat===f)?'':'none'; }); };
+  const sFilter=()=>{ const f=$('#s-filter').value, q=($('#s-search').value||'').trim().toLowerCase();
+    $('#s-rows').querySelectorAll('tr[data-id]').forEach(tr=>{ const okCat=!f||tr.dataset.cat===f; const okQ=!q||tr.textContent.toLowerCase().includes(q); tr.style.display=(okCat&&okQ)?'':'none'; }); };
+  $('#s-filter').onchange=sFilter; $('#s-search').oninput=sFilter;
   $('#view').addEventListener('click',async e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
     if(e.target.classList.contains('s-edit')) sourceForm(list.find(x=>x.id===id),cl);
     if(e.target.classList.contains('s-tog')){ try{ await api(`/sources/${id}/toggle`,{method:'POST'}); route(); }catch(e){toast(e.message,true);} }
@@ -532,9 +633,10 @@ function sourceForm(s,cl){
       <div><label>URL</label><input id="se-url" type="text" value="${h(s.url||'')}"></div>
       <div><label>Tarama (dk)</label><input id="se-int" type="number" value="${s.pollIntervalMinutes}"></div>
       <div><label>Kategori</label>${catSelect('se-cat',cl,s.categoryId||'')}</div>
+      <div><label>Başlangıç tarihi (boş = tümü)</label><input id="se-since" type="datetime-local" value="${dtLocal(s.ingestSince)}"></div>
     </div>
     <button class="btn pri" style="margin-top:14px" id="se-save">Kaydet</button>`);
-  $('#se-save').onclick=async()=>{ try{ await api(`/sources/${s.id}`,{method:'PUT',body:{categoryId:$('#se-cat').value||null,url:$('#se-url').value,pollIntervalMinutes:+$('#se-int').value,selector:null}}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
+  $('#se-save').onclick=async()=>{ try{ await api(`/sources/${s.id}`,{method:'PUT',body:{categoryId:$('#se-cat').value||null,url:$('#se-url').value,pollIntervalMinutes:+$('#se-int').value,selector:null,ingestSince:$('#se-since').value?new Date($('#se-since').value).toISOString():null}}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
 }
 
 /* ---------------- Sosyal Hesaplar ---------------- */
@@ -572,7 +674,7 @@ async function accountDetail(id){
     ${d.lastError?`<div class="chip dng">${h(d.lastError)}</div>`:''}
     <h3>Hedefler (grup/kanal/profil)</h3>
     <table><thead><tr><th>Başlık</th><th>Rol</th><th>Kategori</th><th>Dış ID</th><th></th></tr></thead><tbody>${
-      d.targets.map(t=>`<tr><td>${h(t.title)}</td><td><span class="chip ${t.role==='AdminInbox'?'test':'mut'}">${h(t.role)}</span></td><td class="muted">${h(catName(cl,t.categoryId))}</td><td class="muted">${h(t.externalTargetId)}</td><td><button class="btn dng sm" onclick="disableTarget('${t.id}')">Kapat</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hedef yok.</td></tr>'
+      d.targets.map(t=>`<tr><td>${h(t.title)}</td><td><span class="chip ${t.role==='AdminInbox'?'test':'mut'}">${h(t.role)}</span></td><td>${t.categoryId?`<span class="muted">${h(catName(cl,t.categoryId))}</span>`:'<span class="chip ok">Tüm kategoriler</span>'}</td><td class="muted">${h(t.externalTargetId)}</td><td><button class="btn dng sm" onclick="disableTarget('${t.id}')">Kapat</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hedef yok.</td></tr>'
     }</tbody></table>
     <h3>Hedef ekle</h3>
     <div class="grid k2">
@@ -580,7 +682,7 @@ async function accountDetail(id){
       <div><label>Başlık</label><input id="t-title" type="text"></div>
       <div><label>Tür</label><select id="t-type"><option>Channel</option><option>Group</option><option>Profile</option><option>Feed</option></select></div>
       <div><label>Rol</label><select id="t-role"><option value="Editorial">Editorial (normal yayın)</option><option value="Test">Test (deneme)</option><option value="AdminInbox">AdminInbox (girdi — yayın almaz)</option></select></div>
-      <div><label>Kategori (bu hedef hangi kategorinin içeriğini alsın)</label>${catSelect('t-cat',cl,'')}</div>
+      <div><label>Bu hedef hangi kategorinin içeriğini yayınlasın?</label><select id="t-cat"><option value="">Tüm kategoriler (ortak kanal)</option>${cl.map(c=>`<option value="${c.id}">${h(c.name)}</option>`).join('')}</select><div class="muted" style="font-size:11px;margin-top:4px">Örn: her kategoriye ayrı Instagram → o kategoriyi seç · tüm kategoriler için ortak Twitter → "Tüm kategoriler"</div></div>
     </div>
     <div class="row" style="margin-top:12px"><button class="btn pri" id="t-add">Hedef ekle</button><button class="btn dng right" onclick="disableAccount('${id}')">Hesabı kapat</button></div>`);
   $('#t-add').onclick=async()=>{ try{ await api(`/social-accounts/${id}/targets`,{method:'POST',body:{externalTargetId:$('#t-ext').value,type:$('#t-type').value,role:$('#t-role').value,categoryId:$('#t-cat').value||null,title:$('#t-title').value,language:null,timeZone:null,characterLimit:null}}); toast('Hedef eklendi'); accountDetail(id); }catch(e){toast(e.message,true);} };
@@ -590,14 +692,63 @@ async function disableAccount(id){ if(!confirm('Hesap kapatılsın mı?'))return
 
 /* ---------------- Yayınlar ---------------- */
 async function renderPublications(){
-  $('#view').innerHTML=head('Yayınlar','Hedef başına yayın durumu — başarısızlar yeniden denenebilir',
-    `<select id="pf" style="width:160px"><option value="">Tümü</option><option>Scheduled</option><option>Failed</option><option>Published</option><option>Pending</option><option>Skipped</option></select>`);
+  $('#view').innerHTML=head('Yayınlar','Hedef başına yayın durumu — hedef/hata metninde ara; başarısızlar yeniden denenebilir',
+    `<div class="row"><input id="pq" type="text" placeholder="Hedef veya hata metni ara…" style="width:230px"><select id="pf" style="width:150px"><option value="">Tümü</option><option>Scheduled</option><option>Failed</option><option>Published</option><option>Pending</option><option>Skipped</option></select></div>`);
   const box=document.createElement('div'); box.className='card'; $('#view').appendChild(box);
-  async function load(){ const st=$('#pf').value; const list=await api(`/publishing/publications${st?`?status=${st}`:''}`);
+  const S=VIEW_STATE.pub||(VIEW_STATE.pub={page:1,q:'',status:''});
+  $('#pf').value=S.status; $('#pq').value=S.q;
+  const SIZE=25; let page=S.page;
+  async function load(){ const st=$('#pf').value, q=$('#pq').value.trim();
+    S.page=page; S.status=st; S.q=q;
+    const r=await api(`/publishing/publications?size=${SIZE}&page=${page}${st?`&status=${st}`:''}${q?`&q=${encodeURIComponent(q)}`:''}`);
     box.innerHTML=`<table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Tarih</th><th>Hata</th><th style="width:170px"></th></tr></thead><tbody>${
-      list.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td class="muted">${p.publishedAt?new Date(p.publishedAt).toLocaleString('tr'):new Date(p.createdAt).toLocaleString('tr')}</td><td class="muted" style="max-width:240px">${h(p.error||'')}</td><td class="row"><button class="btn sm" onclick="showDetail('${p.contentItemId}')">İçeriği aç</button>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
-    }</tbody></table>`; }
-  $('#pf').onchange=load; await load();
+      r.items.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td class="muted">${p.publishedAt?new Date(p.publishedAt).toLocaleString('tr'):new Date(p.createdAt).toLocaleString('tr')}</td><td class="muted" style="max-width:240px">${h(p.error||'')}</td><td class="row"><button class="btn sm" onclick="showDetail('${p.contentItemId}')">İçeriği aç</button>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
+    }</tbody></table>${pagerBar(r.total,r.page,r.size)}`; }
+  const reload=()=>{ page=1; S.page=1; load(); };
+  $('#pf').onchange=reload; $('#pq').oninput=debounce(reload,350);
+  box.addEventListener('click',e=>{ const b=e.target.closest('[data-pg]'); if(b){ page=Math.max(1,+b.dataset.pg); load(); } });
+  await load();
+}
+
+/* ---------------- Yorum Moderasyonu ---------------- */
+async function renderComments(){
+  $('#view').innerHTML=head('Yorumlar','Blog yorumları — ara, filtrele, tekil ya da toplu onayla/reddet/spam',
+    `<div class="row"><input id="cq" type="text" placeholder="Ara: yazar, e-posta, yorum, yazı…" style="width:250px">
+      <select id="cf" style="width:150px"><option value="Pending">Bekleyen</option><option value="Approved">Onaylı</option><option value="Rejected">Reddedilen</option><option value="Spam">Spam</option><option value="all">Tümü</option></select></div>`);
+  const bar=document.createElement('div'); bar.className='row'; bar.style.margin='0 0 12px';
+  bar.innerHTML=`<span class="muted">Seçilenler:</span><button class="btn pri sm" data-b="Approved">Onayla</button><button class="btn sm" data-b="Rejected">Reddet</button><button class="btn dng sm" data-b="Spam">Spam</button><span class="muted" id="csum" style="margin-left:auto"></span>`;
+  const box=document.createElement('div'); box.className='card';
+  $('#view').appendChild(bar); $('#view').appendChild(box);
+  const S=VIEW_STATE.comments||(VIEW_STATE.comments={page:1,q:'',status:'Pending'});
+  $('#cf').value=S.status; $('#cq').value=S.q;
+  const SIZE=25; let page=S.page;
+  async function load(){
+    const st=$('#cf').value, q=$('#cq').value.trim();
+    S.page=page; S.status=st; S.q=q;
+    const r=await api(`/comments?status=${st}&size=${SIZE}&page=${page}${q?`&q=${encodeURIComponent(q)}`:''}`);
+    $('#csum').textContent=`${r.total} yorum`;
+    box.innerHTML=`<table><thead><tr><th style="width:28px"><input type="checkbox" id="csel-all" title="Tümünü seç"></th><th>Yazı</th><th>Yazan</th><th>Yorum</th><th style="width:130px">Tarih</th><th style="width:170px">Durum / İşlem</th></tr></thead><tbody>${
+      r.items.map(c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="csel" value="${c.id}"></td>
+        <td><a href="/blog/${encodeURIComponent(c.postSlug)}" target="_blank">${h(c.postTitle)}</a></td>
+        <td>${h(c.authorName)}<div class="muted" style="font-size:11px">${h(c.authorEmail||'')}</div></td>
+        <td class="muted" style="max-width:320px">${h(c.body)}</td>
+        <td class="muted">${new Date(c.createdAt).toLocaleString('tr')}</td>
+        <td class="row">${statusChip(c.status)}<button class="btn pri sm c-ok" title="Onayla">✓</button><button class="btn sm c-no" title="Reddet">✕</button><button class="btn dng sm c-spam" title="Spam">⊘</button></td></tr>`).join('')||'<tr><td colspan=6 class="empty">Yorum yok.</td></tr>'
+    }</tbody></table>${pagerBar(r.total,r.page,r.size)}`;
+    const sa=$('#csel-all'); if(sa) sa.onclick=()=>box.querySelectorAll('.csel').forEach(x=>x.checked=sa.checked);
+  }
+  const reload=()=>{ page=1; S.page=1; load(); };
+  const selIds=()=>[...box.querySelectorAll('.csel:checked')].map(x=>x.value);
+  const actMap={approve:'onaylandı',reject:'reddedildi',spam:'spam işaretlendi'};
+  $('#cf').onchange=reload; $('#cq').oninput=debounce(reload,350);
+  bar.addEventListener('click',async e=>{ const st=e.target.dataset.b; if(!st)return; const ids=selIds();
+    if(!ids.length) return toast('Önce yorum seçin',true);
+    try{ const r=await api('/comments/bulk',{method:'POST',body:{ids,status:st}}); toast(`${r.updated} yorum güncellendi`); load(); }catch(e){toast(e.message,true);} });
+  box.addEventListener('click',async e=>{ const pg=e.target.closest('[data-pg]'); if(pg){ page=Math.max(1,+pg.dataset.pg); return load(); }
+    const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
+    let a=null; if(e.target.classList.contains('c-ok'))a='approve'; if(e.target.classList.contains('c-no'))a='reject'; if(e.target.classList.contains('c-spam'))a='spam';
+    if(!a)return; try{ await api(`/comments/${id}/${a}`,{method:'POST'}); toast('Yorum '+actMap[a]); load(); }catch(e){toast(e.message,true);} });
+  await load();
 }
 
 /* ---------------- Kullanım / Maliyet ---------------- */
@@ -615,6 +766,42 @@ async function renderUsage(){
       (u.rows||[]).map(r=>`<tr><td>${h(r.provider)}</td><td>${h(r.operation)}</td><td>${r.units.toLocaleString('tr')}</td><td>${money(r.costUsd)}</td></tr>`).join('')||'<tr><td colspan=4 class="empty">Henüz kullanım yok.</td></tr>'
     }</tbody></table></div>`; }
   $('#ud').onchange=load; await load();
+}
+
+/* ---------------- Acil Durdurma (kill-switch) ---------------- */
+async function renderKill(){
+  const [sw, cats, accs] = await Promise.all([
+    api('/killswitch'), api('/categories').catch(()=>[]), api('/social-accounts').catch(()=>[])
+  ]);
+  const state={}; sw.forEach(s=>state[`${s.scope}|${s.key||''}`]=s);
+  const isOn=(scope,key)=>{ const s=state[`${scope}|${key||''}`]; return !!(s&&s.engaged); };
+  const reasonOf=(scope,key)=>{ const s=state[`${scope}|${key||''}`]; return s&&s.engaged?s.reason:null; };
+  const row=(scope,key,label,note)=>{ const eng=isOn(scope,key); const r=reasonOf(scope,key);
+    return `<div class="row" style="justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div><div>${h(label)} ${eng?'<span class="chip dng">DURDURULDU</span>':'<span class="chip ok">Açık</span>'}</div>
+        <div class="muted" style="font-size:11px">${h(r||note||'')}</div></div>
+      <button class="btn ${eng?'':'dng'} sm ks" data-scope="${scope}" data-key="${key||''}" data-eng="${eng?1:0}">${eng?'▶ Aç':'⛔ Durdur'}</button></div>`; };
+  const anyOn = sw.some(s=>s.engaged);
+  $('#view').innerHTML = head('Acil Durdurma','Granular fren — hatalı bir akışı anında durdur. Değişiklik ~dakika içinde (worker döngüsü) geçerli olur; işler kaybolmaz, fren kalkınca kaldığı yerden devam eder.')
+    + (anyOn?`<div class="card" style="border-color:var(--danger);background:rgba(239,91,107,.08)"><b style="color:var(--danger)">⛔ En az bir durdurma etkin.</b> Aşağıdan açabilirsin.</div>`:'')
+    + `<div class="card" style="border-color:var(--danger)"><h3 style="margin-top:0;color:var(--danger)">Global</h3>
+        ${row('Global','','TÜM sistem (üretim + yayın + içe aktarma)','En sert fren — her şeyi durdurur')}</div>
+      <div class="card"><h3 style="margin-top:0">Sistem geneli</h3>
+        ${row('Ai','','AI üretimi','Onaylanan içerik için metin/görsel üretimi durur; içerik sırada bekler')}
+        ${row('Ingestion','','İçe aktarma','RSS/sayfa taraması ve keşif durur')}
+        ${row('Publishing','','Yayınlama (tüm kanallar)','Hiçbir hedefe gönderilmez; yayınlar bekletilir')}
+        ${row('Ads','','Reklam','Reklam yerleşimi (ileride devreye girecek)')}</div>
+      <div class="card"><h3 style="margin-top:0">Kanal bazlı yayın</h3>
+        ${['Telegram','X','Instagram','Threads'].map(p=>row('Channel',p,p,'Yalnız bu kanala yayını durdurur')).join('')}</div>
+      <div class="card"><h3 style="margin-top:0">Kategori bazlı</h3>
+        ${cats.length?cats.map(c=>row('Category',c.id,c.name,'Bu kategorinin üretim + yayın + keşfini durdurur')).join(''):'<div class="muted">Kategori yok.</div>'}</div>
+      <div class="card"><h3 style="margin-top:0">Hesap bazlı yayın</h3>
+        ${accs.length?accs.map(a=>row('Account',a.id,`${a.displayName} (${a.platform})`,'Bu hesap üzerinden yayını durdurur')).join(''):'<div class="muted">Hesap yok.</div>'}</div>`;
+  $('#view').addEventListener('click',async e=>{ const b=e.target.closest('.ks'); if(!b)return;
+    const scope=b.dataset.scope, key=b.dataset.key||null, eng=b.dataset.eng==='1', next=!eng;
+    if(scope==='Global'&&next&&!confirm('TÜM sistemi (üretim + yayın + içe aktarma) durdurmak üzeresin. Emin misin?'))return;
+    let reason=null; if(next){ reason=prompt('Durdurma sebebi (opsiyonel):','')||null; }
+    try{ await api('/killswitch',{method:'POST',body:{scope,key,engaged:next,reason}}); toast(next?'Durduruldu':'Açıldı'); route(); }catch(e){toast(e.message,true);} });
 }
 
 /* ---------------- Ayarlar ---------------- */
@@ -657,7 +844,7 @@ async function renderSettings(){
     </div>`;
   $('#ns-add').onclick=async()=>{ const k=$('#ns-key').value.trim(),v=$('#ns-val').value; if(!k||!v)return toast('Anahtar ve değer gerekli',true);
     try{ await api('/settings',{method:'PUT',body:{key:k,value:v,isSecret:$('#ns-sec').checked}}); toast('Kaydedildi'); route(); }catch(e){toast(e.message,true);} };
-  $('#view').addEventListener('click',async e=>{ if(e.target.dataset.k){ const k=e.target.dataset.k,sec=e.target.dataset.s==='true',v=$('#'+e.target.dataset.in).value;
+  $('#view').addEventListener('click',async e=>{ if(e.target.dataset.k){ const k=e.target.dataset.k,sec=e.target.dataset.s==='true',v=document.getElementById(e.target.dataset.in).value;
     if(!v)return toast('Değer boş',true); try{ await api('/settings',{method:'PUT',body:{key:k,value:v,isSecret:sec}}); toast('Kaydedildi'); route(); }catch(e){toast(e.message,true);} } });
 }
 

@@ -27,12 +27,23 @@ public sealed record ContentDetailDto(
     RiskLevel RiskLevel, ImageSource ImageSource, bool TestMode, Guid? CategoryId,
     string? Title, string? ShortX, string? BodyHtml, string? InstagramCaption,
     IReadOnlyList<string> Tags, string? MediaUrl, DateTimeOffset CreatedAt, DateTimeOffset? ScheduledAt, DateTimeOffset? PublishedAt,
-    string? HoldReason);
+    string? HoldReason, string? RawInput);
 
 public sealed record PagedContentDto(IReadOnlyList<ContentSummaryDto> Items, int Page, int Size, int Total);
+
+public sealed record AuditDto(AuditEvent Event, ActorType ActorType, string ActorRef, string? Detail, DateTimeOffset At);
 
 public sealed record EditRevisionRequest(
     string Title, string ShortX, string BodyHtml, string? InstagramCaption,
     IReadOnlyList<string> Tags, string? PrimaryKeyword, string? ImageAltText);
 
 public sealed record TestModeRequest(bool Enabled);
+
+/// <summary>Panelden "tüm alanları AI ile üret" — seed boşsa kayıtlı ham metin kullanılır.</summary>
+public sealed record GenerateDraftRequest(string? SeedInput);
+
+/// <summary>Tek alan üretimi — verilen bağlamdan istenen alanı üretir.</summary>
+public sealed record GenerateFieldRequest(string Field, string? Title, string? ShortX, string? BodyHtml, string? InstagramCaption, string? RawInput);
+
+/// <summary>Detay ekranından görsel üretimi — hangi kaynak (Ai/SkiaCard/Manual).</summary>
+public sealed record PreviewImageRequest(ImageSource ImageSource);

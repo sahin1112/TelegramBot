@@ -27,7 +27,7 @@ internal static class SourceEndpoints
 
         g.MapPost("/", async (CreateSourceRequest req, ISourceRepository repo, IClock clock, CancellationToken ct) =>
         {
-            var source = new Source(req.CategoryId, req.Type, req.Url, req.PollIntervalMinutes, req.Selector, clock);
+            var source = new Source(req.CategoryId, req.Type, req.Url, req.PollIntervalMinutes, req.Selector, req.IngestSince, clock);
             await repo.AddAsync(source, ct);
             await repo.SaveChangesAsync(ct);
             return Results.Created($"/api/v1/sources/{source.Id}", new { id = source.Id });
@@ -37,7 +37,7 @@ internal static class SourceEndpoints
         {
             var s = await repo.GetAsync(id, ct);
             if (s is null) return Results.NotFound();
-            s.Update(req.CategoryId, req.Url, req.PollIntervalMinutes, req.Selector, clock);
+            s.Update(req.CategoryId, req.Url, req.PollIntervalMinutes, req.Selector, req.IngestSince, clock);
             await repo.SaveChangesAsync(ct);
             return Results.Ok();
         });
@@ -66,7 +66,7 @@ internal static class SourceEndpoints
         {
             var reader = readers.FirstOrDefault(r => r.CanRead(req.Type));
             if (reader is null) return Results.BadRequest("Bu kaynak türü okunamıyor.");
-            var probe = new Source(null, req.Type, req.Url, 15, req.Selector, clock);
+            var probe = new Source(null, req.Type, req.Url, 15, req.Selector, null, clock);
             var items = await reader.ReadAsync(probe, ct);
             return Results.Ok(items.Take(10));
         });
@@ -76,5 +76,5 @@ internal static class SourceEndpoints
             Results.Ok(new { discovered = await discovery.DiscoverDueAsync(ct) }));
     }
 
-    private static SourceDto Dto(Source s) => new(s.Id, s.CategoryId, s.Type, s.Url, s.PollIntervalMinutes, s.IsActive, s.LastPolledAt);
+    private static SourceDto Dto(Source s) => new(s.Id, s.CategoryId, s.Type, s.Url, s.PollIntervalMinutes, s.IsActive, s.LastPolledAt, s.IngestSince);
 }

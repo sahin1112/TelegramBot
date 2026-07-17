@@ -22,6 +22,22 @@ internal sealed class PublicationRepository(PublishingDbContext db) : IPublicati
         return await q.OrderByDescending(x => x.CreatedAt).Take(take).ToListAsync(ct);
     }
 
+    public async Task<(IReadOnlyList<Publication> Items, int Total)> ListPagedAsync(Guid? contentItemId, PublicationStatus? status, string? search, int page, int size, CancellationToken ct)
+    {
+        var q = db.Publications.AsQueryable();
+        if (contentItemId is { } cid) q = q.Where(x => x.ContentItemId == cid);
+        if (status is { } st) q = q.Where(x => x.Status == st);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            q = q.Where(x => x.TargetRef.Contains(term) || (x.Error != null && x.Error.Contains(term)));
+        }
+        var total = await q.CountAsync(ct);
+        var items = await q.OrderByDescending(x => x.CreatedAt)
+            .Skip(Math.Max(0, page - 1) * size).Take(size).ToListAsync(ct);
+        return (items, total);
+    }
+
     public async Task AddAsync(Publication publication, CancellationToken ct) =>
         await db.Publications.AddAsync(publication, ct);
 

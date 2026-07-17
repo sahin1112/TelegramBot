@@ -22,7 +22,7 @@ public sealed class PublishingModule : IModule
         services.Configure<OpenAiOptions>(configuration.GetSection("OpenAI"));
 
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
+                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
         services.AddDbContext<PublishingDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", PublishingDbContext.Schema)));
         services.AddScoped<IStartupMigrator, PublishingMigrator>();
@@ -35,7 +35,10 @@ public sealed class PublishingModule : IModule
 
         // Dayanıklı adlandırılmış HttpClient'lar (retry + circuit breaker + timeout).
         services.AddHttpClient(TelegramPublisher.HttpClientName).AddStandardResilienceHandler();
-        services.AddHttpClient(OpenAiTextProvider.HttpClientName).AddStandardResilienceHandler();
+        // OpenAI: uzun SEO içeriği üretimi 30 sn'yi aşabilir. Standart dayanıklılık işleyicisinin
+        // varsayılan 30 sn TOPLAM zaman aşımı yetersiz; ayrıca pahalı/yinelenemez bir çağrıyı otomatik
+        // yeniden denemek çift ücretlendirir. Bu yüzden burada sade, uzun (3 dk) zaman aşımı kullanıyoruz.
+        services.AddHttpClient(OpenAiTextProvider.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(3));
 
         // Kanal adaptörleri (yeni kanal = yeni IChannelPublisher; çekirdek değişmez).
         services.AddSingleton<IChannelPublisher, TelegramPublisher>();
