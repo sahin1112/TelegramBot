@@ -142,6 +142,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
       <a href="#comments"><span class="ic">💬</span> Yorumlar</a>
       <a href="#usage"><span class="ic">$</span> Kullanım / Maliyet</a>
       <a href="#kill"><span class="ic">⛔</span> Acil Durdurma</a>
+      <a href="#site"><span class="ic">🌐</span> Site / SEO</a>
       <a href="#settings"><span class="ic">⚙</span> Ayarlar</a>
       <a href="#" id="logout"><span class="ic">⎋</span> Çıkış</a>
     </nav>
@@ -194,7 +195,7 @@ const auditLabel = e => { const m={Created:'Oluşturuldu',Approved:'Onaylandı',
 const routes = {
   dashboard:renderDashboard, queue:renderQueue, content:renderContent, add:renderAdd,
   categories:renderCategories, scheduled:renderScheduled, pending:renderPending, sources:renderSources, accounts:renderAccounts,
-  publications:renderPublications, comments:renderComments, usage:renderUsage, kill:renderKill, settings:renderSettings
+  publications:renderPublications, comments:renderComments, usage:renderUsage, kill:renderKill, settings:renderSettings, site:renderSite
 };
 /* Kategori önbelleği + seçici */
 let _cats=null;
@@ -366,6 +367,7 @@ async function showDetail(id){
         ${d.editorialStatus==='Draft'?'<button class="btn pri" id="e-submit" title="İçerik hazırsa onay kuyruğuna gönder">✓ Onaya gönder</button>':''}
         ${d.mediaStatus==='Ready'&&d.editorialStatus!=='Published'?'<button class="btn" id="e-publish">Yayınla</button>':''}
         <label class="row" style="margin:0"><input type="checkbox" id="e-test" ${d.testMode?'checked':''} style="width:auto"> Test modu</label>
+        <label class="row" style="margin:0"><input type="checkbox" id="e-adgate" style="width:auto"> Reklam izlet (Adsgram)</label>
         <button class="btn dng right" id="e-retract">Geri çek</button>
       </div>
     </div>
@@ -412,7 +414,7 @@ async function showDetail(id){
     try{ await api(`/editorial/${id}/revision`,{method:'PUT',body}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);}
   };
   const subBtn=$('#e-submit'); if(subBtn) subBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/submit-review`,{method:'POST'}); toast('Onaya gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
-  const pubBtn=$('#e-publish'); if(pubBtn) pubBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/publish`,{method:'POST'}); toast('Yayına gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
+  const pubBtn=$('#e-publish'); if(pubBtn) pubBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/publish?adGate=${($('#e-adgate')&&$('#e-adgate').checked)?'true':'false'}`,{method:'POST'}); toast('Yayına gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
   $('#e-test').onchange=async(ev)=>{ try{ await api(`/editorial/${id}/testmode`,{method:'POST',body:{enabled:ev.target.checked}}); toast('Test modu güncellendi'); }catch(e){toast(e.message,true);} };
   $('#e-retract').onclick=async()=>{ if(!confirm('Geri çekilsin mi?'))return; try{ await api(`/editorial/${id}/retract`,{method:'POST'}); toast('Geri çekildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
   // 🖼️ Görsel: kaynak seç + anlık üret/yükle + önizleme (yayınlamaz)
@@ -805,6 +807,51 @@ async function renderKill(){
 }
 
 /* ---------------- Ayarlar ---------------- */
+async function renderSite(){
+  const list = await api('/settings').catch(()=>[]);
+  const cur={}; (list||[]).forEach(s=>{ if(!s.isSecret) cur[s.key]=s.maskedValue; });
+  const groups=[
+    ['Site & Yazar', [['site.name','Site adı','text'],['site.description','Kısa açıklama (meta)','text'],['home.author','Yazar / byline adı','text']]],
+    ['Ana Sayfa', [
+      ['home.featured_slug','Öne çıkan yazı — slug (boşsa en yeni)','text'],
+      ['home.telegram_url','Telegram linki','text'],['home.telegram_members','Telegram üye sayısı (ör. 52.8B)','text'],
+      ['home.x_url','X linki','text'],['home.x_followers','X takipçi','text'],
+      ['home.instagram_url','Instagram linki','text'],['home.instagram_followers','Instagram takipçi','text'],
+      ['home.threads_url','Threads linki','text'],['home.threads_followers','Threads takipçi','text'],
+      ['home.youtube_url','YouTube linki','text'],['home.youtube_subscribers','YouTube abone','text']
+    ]],
+    ['SEO & Analytics', [
+      ['seo.ga4_id','Google Analytics (GA4) — G-XXXX','text'],
+      ['seo.gtm_id','Google Tag Manager — GTM-XXXX','text'],
+      ['seo.gsc_verification','Search Console doğrulama kodu','text'],
+      ['seo.indexnow_key','IndexNow anahtarı (Bing/Yandex)','text']
+    ]],
+    ['Reklam & Uyum', [
+      ['home.ads_enabled','Reklamlar açık','check'],
+      ['home.adsense_client','AdSense yayıncı kimliği — ca-pub-…','text'],
+      ['telegram.miniapp_url','Telegram Mini App linki (ör. https://t.me/BotAdi/app)','text'],
+      ['ads.adsgram_block','Adsgram Block ID (mini-app reklamı)','text'],
+      ['seo.ads_min_words','Reklam için min. kelime (kısa yazıya reklam yok)','text'],
+      ['seo.consent_required','Çerez onayı (consent) gerekli','check'],
+      ['seo.privacy_url','Gizlilik politikası URL','text'],
+      ['seo.cookie_url','Çerez politikası URL','text'],
+      ['seo.ads_txt','ads.txt içeriği','area']
+    ]]
+  ];
+  const field=(k,l,t)=>{
+    const v=cur[k]||'';
+    if(t==='check'){const on=(v==='1'||v==='true');return `<div class="row" style="margin-bottom:10px"><div class="s-lbl muted">${h(l)}</div><label class="row" style="margin:0"><input type="checkbox" data-key="${k}" data-check="1" ${on?'checked':''} style="width:auto"> Açık</label></div>`;}
+    if(t==='area'){return `<div style="margin-bottom:10px"><div class="s-lbl muted" style="margin-bottom:4px">${h(l)}</div><textarea data-key="${k}" style="width:100%;min-height:90px">${h(v)}</textarea></div>`;}
+    return `<div class="row" style="margin-bottom:10px"><div class="s-lbl muted">${h(l)}</div><input type="text" data-key="${k}" value="${h(v)}" style="flex:1;min-width:180px"></div>`;
+  };
+  const cards=groups.map(g=>`<div class="card"><h3 style="margin-top:0">${h(g[0])}</h3>${g[1].map(f=>field(f[0],f[1],f[2])).join('')}</div>`).join('');
+  $('#view').innerHTML=head('Site / SEO','Ana sayfa, sosyal şerit, Analytics ve reklam ayarları — kaydedince yeniden deploy gerekmez')+cards+`<div class="row" style="margin:8px 0 40px"><button class="btn pri" id="site-save">Tümünü Kaydet</button></div>`;
+  $('#site-save').onclick=async()=>{
+    const els=[].slice.call($('#view').querySelectorAll('[data-key]'));
+    try{ for(const el of els){ const k=el.getAttribute('data-key'); const val=el.getAttribute('data-check')?(el.checked?'1':'0'):el.value; await api('/settings',{method:'PUT',body:{key:k,value:val,isSecret:false}}); } toast('Kaydedildi'); }catch(e){toast(e.message,true);}
+  };
+}
+
 async function renderSettings(){
   const [list, channels, health] = await Promise.all([
     api('/settings'),

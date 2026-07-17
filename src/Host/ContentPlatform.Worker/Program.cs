@@ -6,7 +6,10 @@ using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Services.AddSerilog(cfg => cfg.ReadFrom.Configuration(builder.Configuration).WriteTo.Console());
+// Windows Servisi olarak calis (SCM ile konus + calisma dizinini exe klasorune sabitle).
+builder.Services.AddWindowsService(o => o.ServiceName = "TelegramWorker");
+
+builder.Services.AddSerilog(cfg => cfg.ReadFrom.Configuration(builder.Configuration).WriteTo.Console().WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "worker-.log"), rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10));
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddIntegrationEventBus();
 
@@ -56,4 +59,9 @@ builder.Services.AddQuartz(q =>
 builder.Services.AddQuartzHostedService(o => o.WaitForJobsToComplete = true);
 
 var host = builder.Build();
+
+// Bekleyen migration'ları uygula (Api ile aynı davranış; Worker sunucuda tek başına da ayağa kalkabilir).
+if (builder.Configuration.GetValue("Database:AutoMigrate", true))
+    await host.MigrateDatabaseAsync();
+
 host.Run();

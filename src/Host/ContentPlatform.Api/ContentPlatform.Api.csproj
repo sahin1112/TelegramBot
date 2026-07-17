@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <!-- EF Core Tools (dotnet ef) başlangıç projesinde Design paketini arar -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">

@@ -7,7 +7,7 @@ using Serilog;
 var builder = WebApplication.CreateBuilder(args);
 
 // -------- Loglama (Serilog) --------
-builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console().WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "api-.log"), rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10));
+builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
 // -------- Cross-cutting --------
 builder.Services.AddSingleton<IClock, SystemClock>();
@@ -58,23 +58,4 @@ app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
         else if (path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
             ctx.Context.Response.Headers.CacheControl = "no-cache";
     }
-}); // wwwroot/admin (panel) + wwwroot/media (görseller)
-app.UseMiddleware<AuthMiddleware>(); // /api/v1/* korumalı (login hariç)
-if (app.Environment.IsDevelopment()) app.MapOpenApi();
-
-// Kök (/) -> herkese açık blog; panel yalnız /HmbAdmin ile açılır.
-app.MapGet("/", () => Results.Redirect("/blog")).ExcludeFromDescription();
-app.MapGet("/HmbAdmin", () => Results.Redirect("/admin/index.html")).ExcludeFromDescription();
-app.MapGet("/health", () => Results.Ok(new { status = "ok", modules = modules.Select(m => m.Name) }))
-   .WithTags("System");
-
-// Modül endpoint'leri
-AuthEndpoints.Map(app);
-ModuleRegistrar.MapAll(app, modules);
-
-Log.Information("İçerik Platformu API başladı. Modüller: {Modules}", string.Join(", ", modules.Select(m => m.Name)));
-// Bekleyen migration'ları uygula (sunucuda dışarıdan DB erişimi gerekmez).
-if (app.Configuration.GetValue("Database:AutoMigrate", true))
-    await app.MigrateDatabaseAsync();
-
-app.Run();
+}); // wwwroot/admin (panel) 

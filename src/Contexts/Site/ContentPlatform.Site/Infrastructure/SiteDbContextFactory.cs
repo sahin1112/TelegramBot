@@ -12,7 +12,7 @@ internal sealed class SiteDbContextFactory : IDesignTimeDbContextFactory<SiteDbC
     public SiteDbContext CreateDbContext(string[] args)
     {
         var cs = Environment.GetEnvironmentVariable("CONTENTPLATFORM_DB")
-                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
+                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
         var options = new DbContextOptionsBuilder<SiteDbContext>()
             .UseSqlServer(cs, sql => sql.MigrationsHistoryTable("__ef_migrations", SiteDbContext.Schema))
             .Options;

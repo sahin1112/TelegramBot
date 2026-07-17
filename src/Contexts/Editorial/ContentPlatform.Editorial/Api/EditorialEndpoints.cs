@@ -56,9 +56,9 @@ internal static class EditorialEndpoints
                 .Select(a => new AuditDto(a.Event, a.ActorType, a.ActorRef, a.Detail, a.CreatedAt))));
 
         // ---- Yayınla (kalite kapısında tutulan / hazır içeriği elle yayına gönder) ----
-        g.MapPost("/{id:guid}/publish", async (Guid id, ContentGenerationService gen, CancellationToken ct) =>
+        g.MapPost("/{id:guid}/publish", async (Guid id, bool? adGate, ContentGenerationService gen, CancellationToken ct) =>
         {
-            var r = await gen.PublishExistingAsync(id, ct);
+            var r = await gen.PublishExistingAsync(id, adGate ?? false, ct);
             return r.IsSuccess ? Results.Ok() : Results.Conflict(r.Error);
         });
 

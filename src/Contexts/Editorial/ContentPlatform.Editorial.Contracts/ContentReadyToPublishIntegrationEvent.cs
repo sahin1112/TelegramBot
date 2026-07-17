@@ -17,4 +17,5 @@ public sealed record ContentReadyToPublishIntegrationEvent(
     string? PrimaryKeyword,
     string? MediaUrl,
     string? Link,
-    DateTimeOffset? ScheduledAt) : IIntegrationEvent;
+    DateTimeOffset? ScheduledAt,
+    bool AdGate = false) : IIntegrationEvent;

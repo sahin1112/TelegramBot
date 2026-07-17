@@ -44,7 +44,7 @@ public sealed class DistributionService(
 
         var request = new PublishRequest(
             pub.Channel, payload.Title, payload.Text, payload.Hashtags,
-            payload.MediaUrl, payload.Link, pub.TargetRef, media);
+            payload.MediaUrl, payload.Link, pub.TargetRef, media, payload.ButtonUrl, payload.ButtonText);
 
         var result = await registry.Resolve(pub.Channel).PublishAsync(request, credentials, ct);
 

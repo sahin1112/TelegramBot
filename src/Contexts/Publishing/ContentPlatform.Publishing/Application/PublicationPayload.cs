@@ -2,7 +2,8 @@ namespace ContentPlatform.Publishing.Application;
 
 /// <summary>Yayın anlık kopyası — retry AI'yı tekrar çalıştırmadan aynı içeriği gönderebilsin.</summary>
 public sealed record PublicationPayload(
-    string? Title, string Text, IReadOnlyList<string> Hashtags, string? MediaUrl, string? Link);
+    string? Title, string Text, IReadOnlyList<string> Hashtags, string? MediaUrl, string? Link,
+    string? ButtonUrl = null, string? ButtonText = null);
 
 public sealed record PublicationDto(
     Guid Id, Guid ContentItemId, string Channel, string TargetRef, string Status,

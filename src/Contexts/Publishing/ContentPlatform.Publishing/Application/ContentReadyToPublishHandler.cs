@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ContentPlatform.Abstractions;
 using ContentPlatform.Editorial.Contracts;
 using ContentPlatform.Publishing.Domain;
@@ -15,6 +16,7 @@ public sealed class ContentReadyToPublishHandler(
     IPublicationTargetResolver targetResolver,
     IPublicationRepository publications,
     DistributionService distribution,
+    ISettingsProvider settings,
     ISchedulePlanner planner,
     IClock clock,
     ILogger<ContentReadyToPublishHandler> logger)
@@ -37,7 +39,8 @@ public sealed class ContentReadyToPublishHandler(
         if (!e.TestMode)
             scheduledAt = e.ScheduledAt ?? await planner.NextSlotAsync(e.CategoryId, ct);
 
-        var payloadJson = JsonSerializer.Serialize(new PublicationPayload(e.Title, e.ShortX, e.Tags, e.MediaUrl, e.Link));
+        var (buttonUrl, buttonText) = await BuildDetailButtonAsync(e, ct);
+        var payloadJson = JsonSerializer.Serialize(new PublicationPayload(e.Title, e.ShortX, e.Tags, e.MediaUrl, e.Link, buttonUrl, buttonText));
 
         foreach (var target in targets)
         {
@@ -66,4 +69,46 @@ public sealed class ContentReadyToPublishHandler(
         if (scheduledAt is { } at)
             logger.LogInformation("İçerik {Id} {Time} için planlandı ({Count} hedef).", e.ContentItemId, at, targets.Count);
     }
+    /// <summary>
+    /// Gonderi altindaki "Haber ayrintisi" butonunu kurar. AdGate ise Mini App derin linki (Adsgram reklami),
+    /// degilse dogrudan makale linki. Link yoksa (test icerik) buton yok.
+    /// </summary>
+    private async Task<(string? Url, string? Text)> BuildDetailButtonAsync(ContentReadyToPublishIntegrationEvent e, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(e.Link)) return (null, null);
+        const string text = "Haber ayrıntısı için tıkla";
+
+        var url = e.Link;
+        if (e.AdGate)
+        {
+            var miniapp = await settings.GetAsync("telegram.miniapp_url", ct);
+            if (!string.IsNullOrWhiteSpace(miniapp))
+            {
+                var i = e.Link.IndexOf("/blog/", StringComparison.Ordinal);
+                var slug = i >= 0 ? e.Link[(i + 6)..] : "";
+                slug = Regex.Replace(slug, "[^A-Za-z0-9_-]", "");
+                var sep = miniapp.Contains('?') ? "&" : "?";
+                url = $"{miniapp}{sep}startapp={slug}";
+            }
+        }
+
+        // Telegram inline buton URL'i herkese açık geçerli bir http(s) adresi olmalı.
+        // localhost/relative/geçersiz ise butonu ekleme (gönderi yine de gitsin, tüm yayın patlamasın).
+        if (!IsPublicHttpUrl(url))
+        {
+            logger.LogWarning("Buton URL'i geçersiz/herkese açık değil, buton eklenmedi: {Url}", url);
+            return (null, null);
+        }
+        return (url, text);
+    }
+
+    private static bool IsPublicHttpUrl(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return false;
+        if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps) return false;
+        if (string.Equals(u.Host, "localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        if (u.Host is "127.0.0.1" or "::1") return false;
+        return true;
+    }
 }
+

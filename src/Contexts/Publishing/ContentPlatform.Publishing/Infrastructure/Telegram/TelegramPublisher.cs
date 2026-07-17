@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using ContentPlatform.Abstractions;
 using ContentPlatform.SharedKernel;
 using Microsoft.Extensions.Logging;
@@ -27,6 +28,9 @@ internal sealed class TelegramPublisher(
         var client = httpClientFactory.CreateClient(HttpClientName);
         var baseUrl = $"https://api.telegram.org/bot{token}";
         var caption = BuildText(request);
+        System.Text.Json.JsonElement? replyMarkup = string.IsNullOrWhiteSpace(request.ButtonUrl)
+            ? null
+            : JsonSerializer.SerializeToElement(new { inline_keyboard = new[] { new[] { new { text = string.IsNullOrWhiteSpace(request.ButtonText) ? "Devamını oku" : request.ButtonText, url = request.ButtonUrl } } } });
 
         try
         {
@@ -40,6 +44,8 @@ internal sealed class TelegramPublisher(
                     { new StringContent(caption), "caption" },
                     { new StringContent("HTML"), "parse_mode" }
                 };
+                if (replyMarkup is not null)
+                    form.Add(new StringContent(replyMarkup.Value.GetRawText()), "reply_markup");
                 var photo = new ByteArrayContent(media.Bytes);
                 photo.Headers.TryAddWithoutValidation("Content-Type", media.ContentType);
                 form.Add(photo, "photo", media.FileName);
@@ -48,12 +54,12 @@ internal sealed class TelegramPublisher(
             else if (!string.IsNullOrWhiteSpace(request.MediaUrl))
             {
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendPhoto",
-                    new { chat_id = request.TargetRef, photo = request.MediaUrl, caption, parse_mode = "HTML" }, ct);
+                    new { chat_id = request.TargetRef, photo = request.MediaUrl, caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
             }
             else
             {
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendMessage",
-                    new { chat_id = request.TargetRef, text = caption, parse_mode = "HTML" }, ct);
+                    new { chat_id = request.TargetRef, text = caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
             }
 
             using (response)
@@ -79,7 +85,7 @@ internal sealed class TelegramPublisher(
         if (!string.IsNullOrWhiteSpace(r.Title)) parts.Add($"<b>{r.Title}</b>");
         if (!string.IsNullOrWhiteSpace(r.Text)) parts.Add(r.Text);
         if (r.Hashtags.Count > 0) parts.Add(string.Join(' ', r.Hashtags));
-        if (!string.IsNullOrWhiteSpace(r.Link)) parts.Add(r.Link);
+        if (!string.IsNullOrWhiteSpace(r.Link) && string.IsNullOrWhiteSpace(r.ButtonUrl)) parts.Add(r.Link);
         return string.Join("\n\n", parts);
     }
 

@@ -102,6 +102,9 @@ public sealed class ContentGenerationService(
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "AI uretimi basarisiz: {Id}", item.Id);
+                // Hatayi icerige yaz ki panelde 'HoldReason' olarak gorunur olsun (sessiz kalmasin).
+                try { item.HoldForReview("Üretim hatası: " + ex.Message, clock); await repository.SaveChangesAsync(ct); }
+                catch (Exception ex2) { logger.LogWarning(ex2, "Üretim hatası içeriğe yazılamadı: {Id}", item.Id); }
             }
         }
 
@@ -227,7 +230,7 @@ public sealed class ContentGenerationService(
     }
 
     /// <summary>Admin override: tutulmuş/hazır bir içeriği elle yayına gönderir (kalite kapısını atlar).</summary>
-    public async Task<Result> PublishExistingAsync(Guid contentItemId, CancellationToken ct)
+    public async Task<Result> PublishExistingAsync(Guid contentItemId, bool adGate, CancellationToken ct)
     {
         var item = await repository.GetAsync(contentItemId, ct);
         if (item is null) return Result.Failure(Error.NotFound("İçerik"));
@@ -237,11 +240,11 @@ public sealed class ContentGenerationService(
         var mediaUrl = item.Media.LastOrDefault()?.Url;
         await PublishReadyAsync(item,
             new Fields(rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags, rev.PrimaryKeyword, rev.ImageAltText),
-            mediaUrl, ct);
+            mediaUrl, ct, adGate);
         return Result.Success();
     }
 
-    private Task PublishReadyAsync(ContentItem item, Fields f, string? mediaUrl, CancellationToken ct)
+    private Task PublishReadyAsync(ContentItem item, Fields f, string? mediaUrl, CancellationToken ct, bool adGate = false)
     {
         // Blog linki: test içeriği bloglanmaz → linksiz. Aksi halde Site ile AYNI slug formülü (BlogSlug).
         string? link = null;
@@ -252,7 +255,7 @@ public sealed class ContentGenerationService(
         return bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
             Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, item.TestMode,
             f.Title, f.ShortX, f.BodyHtml, f.InstagramCaption, f.Tags.ToList(), f.PrimaryKeyword, mediaUrl,
-            Link: link, ScheduledAt: item.ScheduledAt), ct);
+            Link: link, ScheduledAt: item.ScheduledAt, AdGate: adGate), ct);
     }
 
     // ---- Elle (panel) AI üretimi ----

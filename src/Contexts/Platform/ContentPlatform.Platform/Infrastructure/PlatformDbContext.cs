@@ -74,5 +74,11 @@ public sealed class PlatformDbContext(DbContextOptions<PlatformDbContext> option
             e.Property(x => x.Reason).HasMaxLength(500);
             e.HasIndex(x => new { x.Scope, x.Key }).IsUnique();
         });
+
+        // Tüm Guid birincil anahtarlar uygulamada üretilir (Entity.Id = Guid.NewGuid()); EF üretmesin.
+        // Aksi halde tracked parent'a navigation'la eklenen yeni child INSERT yerine UPDATE'lenir (0 satır → hata).
+        foreach (var key in b.Model.GetEntityTypes().Select(t => t.FindPrimaryKey()))
+            if (key is { Properties.Count: 1 } && key.Properties[0].ClrType == typeof(Guid))
+                key.Properties[0].ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never;
     }
 }

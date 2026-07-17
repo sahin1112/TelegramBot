@@ -18,7 +18,9 @@ public sealed record PublishRequest(
     string? MediaUrl,
     string? Link,
     string TargetRef,
-    MediaContent? Media = null);
+    MediaContent? Media = null,
+    string? ButtonUrl = null,
+    string? ButtonText = null);
 
 public sealed record PublishResult(bool Published, string? ExternalId, Error? Error);
 
