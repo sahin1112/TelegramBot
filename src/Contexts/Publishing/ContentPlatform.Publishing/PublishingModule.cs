@@ -40,9 +40,22 @@ public sealed class PublishingModule : IModule
         // yeniden denemek çift ücretlendirir. Bu yüzden burada sade, uzun (3 dk) zaman aşımı kullanıyoruz.
         services.AddHttpClient(OpenAiTextProvider.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(3));
 
+        // Meta (Instagram/Threads) gönderimi: video işleme beklemesi uzun sürebilir → sade, uzun zaman aşımı.
+        services.AddHttpClient(Infrastructure.Meta.InstagramPublisher.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(2));
+        // YouTube/TikTok video yükleme: dosya baytları gövdede taşınır → daha da uzun zaman aşımı.
+        services.AddHttpClient(Infrastructure.Google.YoutubePublisher.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(5));
+
         // Kanal adaptörleri (yeni kanal = yeni IChannelPublisher; çekirdek değişmez).
+        // Bir adaptör kaydedilince ContentReadyToPublishHandler o kanala OTOMATİK yayın açar.
         services.AddSingleton<IChannelPublisher, TelegramPublisher>();
-        services.AddSingleton<IChannelPublisherRegistry, ChannelPublisherRegistry>();
+        // Instagram: ISettingsProvider (scoped) kullandığı için SCOPED (registry de scoped — sorun yok).
+        services.AddScoped<IChannelPublisher, Infrastructure.Meta.InstagramPublisher>();
+        services.AddSingleton<IChannelPublisher, Infrastructure.Meta.ThreadsPublisher>();
+        services.AddSingleton<IChannelPublisher, Infrastructure.Google.YoutubePublisher>();
+        services.AddSingleton<IChannelPublisher, Infrastructure.TikTok.TikTokPublisher>();
+        // X: ICredentialUpdater scoped (Platform) olduğundan XPublisher da SCOPED kaydedilir.
+        services.AddScoped<IChannelPublisher, Infrastructure.X.XPublisher>();
+        services.AddScoped<IChannelPublisherRegistry, ChannelPublisherRegistry>();
 
         // AI sağlayıcıları (soyutlama + ileride fallback).
         services.AddScoped<ITextGenerationProvider, OpenAiTextProvider>();

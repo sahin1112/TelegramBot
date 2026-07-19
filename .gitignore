@@ -13,3 +13,6 @@ TestResults/
 ## Local
 appsettings.*.local.json
 *.env
+
+## Yayın (publish) çıktısı — derleme artefaktı, gite girmez
+publish/

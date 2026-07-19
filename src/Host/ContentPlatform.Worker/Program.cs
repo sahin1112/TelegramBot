@@ -1,5 +1,6 @@
 using ContentPlatform.Abstractions;
 using ContentPlatform.SharedKernel;
+using ContentPlatform.Worker;
 using ContentPlatform.Worker.Jobs;
 using Quartz;
 using Serilog;
@@ -9,7 +10,27 @@ var builder = Host.CreateApplicationBuilder(args);
 // Windows Servisi olarak calis (SCM ile konus + calisma dizinini exe klasorune sabitle).
 builder.Services.AddWindowsService(o => o.ServiceName = "TelegramWorker");
 
-builder.Services.AddSerilog(cfg => cfg.ReadFrom.Configuration(builder.Configuration).WriteTo.Console().WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "worker-.log"), rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10));
+// Konsol + metin + AYRI kritik hata gunlugu (worker-errors) + Api ile ORTAK JSON (.clef).
+// Boylece /_diag/logs ucu worker loglarini da gosterir ([WRK] etiketiyle).
+builder.Services.AddSerilog(cfg =>
+{
+    var logDir = builder.Configuration["Diagnostics:LogDirectory"];
+    if (string.IsNullOrWhiteSpace(logDir))
+        logDir = System.IO.Path.Combine(AppContext.BaseDirectory, "logs");
+    System.IO.Directory.CreateDirectory(logDir);
+
+    cfg.ReadFrom.Configuration(builder.Configuration)
+       .Enrich.FromLogContext()
+       .WriteTo.Console()
+       .WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "worker-.log"),
+           rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10)
+       .WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "worker-errors-.log"),
+           restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Error,
+           rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 30)
+       .WriteTo.File(new ContentPlatform.Logging.JsonLogFormatter(),
+           System.IO.Path.Combine(logDir, "worker-.clef"),
+           rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10);
+});
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddIntegrationEventBus();
 
@@ -22,6 +43,11 @@ ModuleRegistrar.RegisterAll(builder.Services, builder.Configuration, new[]
     typeof(ContentPlatform.Site.SiteModule).Assembly,
     typeof(ContentPlatform.Platform.PlatformModule).Assembly,
 });
+
+// -------- Telegram "/getid" komut dinleyicisi (long-polling) --------
+// Botun bulundugu grup/kanalda "/getid" yazilinca chat_id'yi yanit gonderir.
+// YALNIZ Worker'da; token sunucuda sifreli SocialAccount'tan cozulur.
+builder.Services.AddHostedService<TelegramCommandPoller>();
 
 // -------- Quartz zamanlayıcı --------
 builder.Services.AddQuartz(q =>

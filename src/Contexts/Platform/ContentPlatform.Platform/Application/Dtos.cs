@@ -12,7 +12,14 @@ public sealed record CreateSocialAccountRequest(
 
 public sealed record AddTargetRequest(
     string ExternalTargetId, TargetType Type, TargetRole Role, Guid? CategoryId, string Title,
-    string? Language, string? TimeZone, int? CharacterLimit);
+    string? Language, string? TimeZone, int? CharacterLimit,
+    bool ShowOnHome = false, string? PublicUrl = null, int? FollowerCount = null);
+
+/// <summary>Hedef güncelleme: ekleme alanları + aktif/pasif durumu + ana sayfa yayını.</summary>
+public sealed record UpdateTargetRequest(
+    string ExternalTargetId, TargetType Type, TargetRole Role, Guid? CategoryId, string Title,
+    string? Language, string? TimeZone, int? CharacterLimit, bool IsActive = true,
+    bool ShowOnHome = false, string? PublicUrl = null, int? FollowerCount = null);
 
 /// <summary>Token/kimlik ASLA düz dönmez — maskeli özet.</summary>
 public sealed record SocialAccountDto(
@@ -21,7 +28,8 @@ public sealed record SocialAccountDto(
 
 public sealed record TargetDto(
     Guid Id, PlatformKind Platform, string ExternalTargetId, TargetType Type, TargetRole Role,
-    Guid? CategoryId, string Title, bool IsActive);
+    Guid? CategoryId, string Title, bool IsActive,
+    bool ShowOnHome, string? PublicUrl, int? FollowerCount);
 
 public sealed record SocialAccountDetailDto(
     Guid Id, PlatformKind Platform, string DisplayName, AccountStatus Status,

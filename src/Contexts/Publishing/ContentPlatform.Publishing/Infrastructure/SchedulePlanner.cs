@@ -18,7 +18,8 @@ internal sealed class SchedulePlanner(
         var policy = await policies.GetForCategoryAsync(categoryId, ct);
         if (policy is null || policy.Mode == ScheduleMode.Immediate) return null;
 
-        var existing = await publications.GetScheduledTimesForCategoryAsync(categoryId, ct);
-        return SlotCalculator.Next(policy, clock.UtcNow, existing);
+        var now = clock.UtcNow;
+        var existing = await publications.GetScheduledTimesForCategoryAsync(categoryId, now, ct);
+        return SlotCalculator.Next(policy, now, existing);
     }
 }

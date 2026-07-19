@@ -62,7 +62,10 @@ public sealed class PlatformDbContext(DbContextOptions<PlatformDbContext> option
             e.HasIndex(x => new { x.Platform, x.Role, x.IsActive });
             e.Property(x => x.ExternalTargetId).IsRequired().HasMaxLength(128);
             e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.PublicUrl).HasMaxLength(300);
             e.HasIndex(x => new { x.SocialAccountId, x.ExternalTargetId }).IsUnique();
+            // Ana sayfa sosyal şeridi: yalnız 'yayınla' seçili + aktif hedefler çekilir.
+            e.HasIndex(x => new { x.ShowOnHome, x.IsActive });
         });
 
         b.Entity<KillSwitch>(e =>

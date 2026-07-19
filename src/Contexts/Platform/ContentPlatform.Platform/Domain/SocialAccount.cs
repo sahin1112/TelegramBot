@@ -41,8 +41,8 @@ public sealed class SocialAccount : Entity
 
     public IReadOnlyList<PublicationTarget> Targets => _targets;
 
-    /// <summary>Yalnız IG/Threads gibi süreli token'lar yenilenir.</summary>
-    public bool UsesExpiringToken => Platform is PlatformKind.Instagram or PlatformKind.Threads;
+    /// <summary>Süreli token kullanan platformlar yenilenir: IG/Threads (60 gün) + TikTok (24 saat).</summary>
+    public bool UsesExpiringToken => Platform is PlatformKind.Instagram or PlatformKind.Threads or PlatformKind.TikTok;
 
     public bool NeedsRefresh(IClock clock, TimeSpan threshold) =>
         UsesExpiringToken && TokenExpiresAt is { } exp && exp - clock.UtcNow <= threshold;
@@ -79,9 +79,10 @@ public sealed class SocialAccount : Entity
 
     public PublicationTarget AddTarget(
         string externalTargetId, TargetType type, TargetRole role, Guid? categoryId, string title,
-        string? language, string? timeZone, int? characterLimit, IClock clock)
+        string? language, string? timeZone, int? characterLimit, IClock clock,
+        bool showOnHome = false, string? publicUrl = null, int? followerCount = null)
     {
-        var t = new PublicationTarget(Id, Platform, externalTargetId, type, role, categoryId, title, language, timeZone, characterLimit, clock);
+        var t = new PublicationTarget(Id, Platform, externalTargetId, type, role, categoryId, title, language, timeZone, characterLimit, clock, showOnHome, publicUrl, followerCount);
         _targets.Add(t);
         Touch(clock);
         return t;

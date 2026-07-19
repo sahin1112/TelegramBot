@@ -11,6 +11,10 @@
     <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Api ve Worker ORTAK: tek-satir JSON log formatlayici (linked, tek kaynak dosya) -->
+    <Compile Include="..\..\Shared\Logging\JsonLogFormatter.cs" Link="Diagnostics\JsonLogFormatter.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\Shared\ContentPlatform.SharedKernel\ContentPlatform.SharedKernel.csproj" />
     <ProjectReference Include="..\..\Shared\ContentPlatform.Abstractions\ContentPlatform.Abstractions.csproj" />
     <ProjectReference Include="..\..\Contexts\Ingestion\ContentPlatform.Ingestion\ContentPlatform.Ingestion.csproj" />

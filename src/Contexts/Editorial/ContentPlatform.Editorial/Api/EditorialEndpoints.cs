@@ -1,3 +1,4 @@
+using ContentPlatform.Abstractions;
 using ContentPlatform.Editorial.Application;
 using ContentPlatform.Editorial.Domain;
 using ContentPlatform.SharedKernel;
@@ -13,6 +14,23 @@ internal static class EditorialEndpoints
     {
         var g = app.MapGroup("/api/v1/editorial").WithTags("Editorial");
 
+        // ---- HERKESE AÇIK: görseli JPEG'e çevirerek sunar (/media-jpg/{dosya}) ----
+        // Instagram image_url YALNIZ JPEG kabul eder; SkiaCard/AI görselleri PNG üretilir.
+        // InstagramPublisher PNG/WebP URL'lerini bu uca çevirir; uç dosyayı okur, JPEG'e kodlar.
+        // /api/v1 dışı olduğu için auth istemez (Instagram sunucusu erişebilmeli).
+        app.MapGet("/media-jpg/{file}", async (string file, IMediaReader mediaReader, CancellationToken ct) =>
+        {
+            if (file.Contains('/') || file.Contains('\\') || file.Contains("..")) return Results.NotFound();
+            var m = await mediaReader.TryReadAsync(file, ct);
+            if (m is null) return Results.NotFound();
+            if (m.ContentType == "image/jpeg") return Results.File(m.Bytes, "image/jpeg");
+            using var bmp = SkiaSharp.SKBitmap.Decode(m.Bytes);
+            if (bmp is null) return Results.NotFound();
+            using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 90);
+            return Results.File(data.ToArray(), "image/jpeg");
+        }).ExcludeFromDescription();
+
         // ---- Onay kuyruğu (RSS/sayfa ham içerikleri — AI'sız) ----
         g.MapGet("/queue", async (IContentRepository repo, CancellationToken ct) =>
         {
@@ -21,10 +39,10 @@ internal static class EditorialEndpoints
         });
 
         // ---- İçerik listesi (durum filtreli, sayfalı) ----
-        g.MapGet("/", async (string? status, string? q, int? page, int? size, IContentRepository repo, CancellationToken ct) =>
+        g.MapGet("/", async (string? status, string? q, int? page, int? size, bool? asc, IContentRepository repo, CancellationToken ct) =>
         {
             EditorialStatus? st = Enum.TryParse<EditorialStatus>(status, true, out var s) ? s : null;
-            var (items, total) = await repo.GetPagedAsync(st, q, page ?? 1, size ?? 20, ct);
+            var (items, total) = await repo.GetPagedAsync(st, q, page ?? 1, size ?? 20, asc ?? false, ct);
             return Results.Ok(new PagedContentDto(items.Select(Summary).ToList(), page ?? 1, size ?? 20, total));
         });
 
@@ -36,7 +54,7 @@ internal static class EditorialEndpoints
         });
 
         // ---- Onayla (opsiyonel görsel kaynağı seçimiyle) → AI üretimi tetiklenir ----
-        g.MapPost("/{id:guid}/approve", async (Guid id, ApproveRequest? req, IContentRepository repo, IContentAudit audit, IClock clock, CancellationToken ct) =>
+        g.MapPost("/{id:guid}/approve", async (Guid id, ApproveRequest? req, IContentRepository repo, IContentAudit audit, ContentGenerationService gen, IClock clock, CancellationToken ct) =>
         {
             var item = await repo.GetAsync(id, ct);
             if (item is null) return Results.NotFound();
@@ -47,7 +65,17 @@ internal static class EditorialEndpoints
             if (r.IsFailure) return Results.Conflict(r.Error);
             audit.Log(id, Domain.AuditEvent.Approved, Domain.ActorType.AdminUser, "admin");
             await repo.SaveChangesAsync(ct);
-            return Results.Ok();
+
+            // Metin (revizyon) VE görsel zaten hazırsa Worker'ı beklemeden HEMEN yayına gönder.
+            // (Üretim sorgusu bu durumu almaz; tetiklenmezse içerik sessizce takılırdı.)
+            bool? published = null; string? note = null;
+            if (item.MediaStatus == MediaStatus.Ready && item.Revisions.Any(rv => rv.IsCurrent))
+            {
+                var pr = await gen.PublishExistingAsync(id, adGate: false, ct);
+                published = pr.IsSuccess;
+                if (pr.IsFailure) note = pr.Error.Message;
+            }
+            return Results.Ok(new { published, note });
         });
 
         // ---- İçerik zaman çizelgesi (izlenebilirlik) ----
@@ -56,6 +84,13 @@ internal static class EditorialEndpoints
                 .Select(a => new AuditDto(a.Event, a.ActorType, a.ActorRef, a.Detail, a.CreatedAt))));
 
         // ---- Yayınla (kalite kapısında tutulan / hazır içeriği elle yayına gönder) ----
+        // Tek seferlik TEST gönderimi: test hedeflerine HEMEN yayınlar; asıl yayın akışını değiştirmez.
+        g.MapPost("/{id:guid}/send-test", async (Guid id, ContentGenerationService gen, CancellationToken ct) =>
+        {
+            var r = await gen.SendTestAsync(id, ct);
+            return r.IsSuccess ? Results.Ok() : Results.BadRequest(r.Error);
+        });
+
         g.MapPost("/{id:guid}/publish", async (Guid id, bool? adGate, ContentGenerationService gen, CancellationToken ct) =>
         {
             var r = await gen.PublishExistingAsync(id, adGate ?? false, ct);
@@ -101,9 +136,9 @@ internal static class EditorialEndpoints
         });
 
         // ---- Toplu onay ----
-        g.MapPost("/bulk-approve", async (BulkApproveRequest req, IContentRepository repo, IContentAudit audit, IClock clock, CancellationToken ct) =>
+        g.MapPost("/bulk-approve", async (BulkApproveRequest req, IContentRepository repo, IContentAudit audit, ContentGenerationService gen, IClock clock, CancellationToken ct) =>
         {
-            var ok = 0;
+            var ok = 0; var publishedNow = 0;
             foreach (var id in req.Ids)
             {
                 var item = await repo.GetAsync(id, ct);
@@ -111,10 +146,15 @@ internal static class EditorialEndpoints
                 {
                     audit.Log(id, Domain.AuditEvent.Approved, Domain.ActorType.AdminUser, "admin", "toplu onay");
                     ok++;
+                    await repo.SaveChangesAsync(ct);
+                    // Metin + görsel hazırsa bekletmeden yayına gönder (tekil onayla aynı kural).
+                    if (item.MediaStatus == MediaStatus.Ready && item.Revisions.Any(rv => rv.IsCurrent)
+                        && (await gen.PublishExistingAsync(id, adGate: false, ct)).IsSuccess)
+                        publishedNow++;
                 }
             }
             await repo.SaveChangesAsync(ct);
-            return Results.Ok(new { approved = ok, total = req.Ids.Count });
+            return Results.Ok(new { approved = ok, total = req.Ids.Count, publishedNow });
         });
 
         // ---- Test moduna al/çıkar ----
@@ -184,9 +224,28 @@ internal static class EditorialEndpoints
         }).DisableAntiforgery();
 
         // ---- Detay ekranı: görseli HEMEN üret (AI/SkiaCard) — YAYINLAMAZ, önizleme URL'si döner ----
+        // Video arka plan müziği yükle (mp3) — URL döner; panel bunu 'video.music_url' ayarına yazar.
+        g.MapPost("/video-music", async (IFormFile file, IMediaStore store, CancellationToken ct) =>
+        {
+            if (file is null || file.Length == 0) return Results.BadRequest(new { message = "Dosya boş." });
+            if (file.Length > 10_000_000) return Results.BadRequest(new { message = "En fazla 10 MB." });
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            var url = await store.SaveAsync(ms.ToArray(), "audio/mpeg", ct);
+            return Results.Ok(new { url });
+        }).DisableAntiforgery();
+
+        // Reels/Shorts/TikTok slayt videosu üret (cümle bütünlüklü sayfalar × 7 sn) — önizleme URL'i döner.
+        // Gövde opsiyonel: {style: 0..19} şablon seçer; gövdesiz/boş = RASTGELE şablon.
+        g.MapPost("/{id:guid}/preview-video", async (Guid id, PreviewVideoRequest? req, ContentGenerationService gen, CancellationToken ct) =>
+        {
+            var r = await gen.GeneratePreviewVideoAsync(id, req?.Style, ct);
+            return r.IsSuccess ? Results.Ok(new { url = r.Value }) : Results.BadRequest(r.Error);
+        });
+
         g.MapPost("/{id:guid}/preview-image", async (Guid id, PreviewImageRequest req, ContentGenerationService gen, CancellationToken ct) =>
         {
-            var r = await gen.GeneratePreviewImageAsync(id, req.ImageSource, ct);
+            var r = await gen.GeneratePreviewImageAsync(id, req.ImageSource, req.CardStyle, ct);
             return r.IsSuccess ? Results.Ok(new { url = r.Value }) : Results.Conflict(r.Error);
         });
 
@@ -210,10 +269,11 @@ internal static class EditorialEndpoints
     private static ContentDetailDto Detail(ContentItem i)
     {
         var rev = i.Revisions.FirstOrDefault(r => r.IsCurrent);
-        var media = i.Media.LastOrDefault();
+        var media = i.Media.LastOrDefault(m => m.Kind != Domain.MediaKind.Video); // görsel (video hariç)
+        var video = i.Media.LastOrDefault(m => m.Kind == Domain.MediaKind.Video); // Reels/Shorts videosu
         return new ContentDetailDto(
             i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, i.ImageSource, i.TestMode, i.CategoryId,
             rev?.Title ?? i.RawTitle, rev?.ShortX, rev?.BodyHtml, rev?.InstagramCaption,
-            rev?.Tags ?? new List<string>(), media?.Url, i.CreatedAt, i.ScheduledAt, i.PublishedAt, i.Error, i.RawInput);
+            rev?.Tags ?? new List<string>(), media?.Url, video?.Url, i.CreatedAt, i.ScheduledAt, i.PublishedAt, i.Error, i.RawInput);
     }
 }

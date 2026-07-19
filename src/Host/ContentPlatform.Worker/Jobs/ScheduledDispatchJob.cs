@@ -22,6 +22,8 @@ public sealed class ScheduledDispatchJob(
         var ok = 0;
         foreach (var pub in due)
         {
+            // Atomik sahiplenme: Api'deki yedek gönderici aynı anda çalışıyorsa çifte gönderim olmasın.
+            if (!await publications.TryClaimScheduledAsync(pub.Id, ct)) continue;
             if (await distribution.PublishOneAsync(pub, ct)) ok++;
             await publications.SaveChangesAsync(ct);
         }

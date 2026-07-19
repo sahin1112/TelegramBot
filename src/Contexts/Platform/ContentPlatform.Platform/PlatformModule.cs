@@ -42,6 +42,16 @@ public sealed class PlatformModule : IModule
         services.AddScoped<ISocialAccountRepository, SocialAccountRepository>();
         services.AddScoped<SocialAccountService>();
 
+        // Tek tık hesap bağlama (Meta IG/Threads + Google YouTube + TikTok) — OAuth kod değişimleri
+        // ortak HttpClient'la yapılır.
+        services.AddHttpClient(MetaOAuthService.HttpClientName);
+        services.AddScoped<MetaOAuthService>();
+        services.AddScoped<GoogleOAuthService>();
+        services.AddScoped<TikTokOAuthService>();
+        services.AddScoped<XOAuthService>();
+        // Adaptörlerin yenilenen token'ları kalıcı kayda geri yazma kapısı (X'te hayati: tek kullanımlık refresh token).
+        services.AddScoped<ICredentialUpdater, CredentialUpdater>();
+
         // Token yenileme portu — Worker (TokenRefreshJob) bunu çözer.
         services.AddScoped<ITokenRefresher, TokenRefresher>();
         services.AddScoped<IPublicationTargetResolver, PublicationTargetResolver>();
@@ -51,6 +61,10 @@ public sealed class PlatformModule : IModule
         services.AddScoped<ISettingsProvider>(sp => sp.GetRequiredService<SettingsService>());
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<CategoryService>();
+        // Public site (blog) için aktif kategori kataloğu — üst menü + /kategori/{slug} sayfaları.
+        services.AddScoped<IPublicCategoryProvider, PublicCategoryProvider>();
+        // Ana sayfa sosyal şeridi — "Sosyal Hesaplar"da 'ana sayfada yayınla' seçili hedeflerden.
+        services.AddScoped<IPublicSocialProvider, PublicSocialProvider>();
 
         // Kategori bazlı yayın kadansı politikası — Publishing (SchedulePlanner) bunu çözer.
         services.AddScoped<ISchedulePolicyProvider, CategorySchedulePolicyProvider>();
@@ -66,5 +80,6 @@ public sealed class PlatformModule : IModule
         PlatformEndpoints.Map(endpoints);
         CategoryEndpoints.Map(endpoints);
         KillSwitchEndpoints.Map(endpoints);
+        OAuthEndpoints.Map(endpoints);
     }
 }

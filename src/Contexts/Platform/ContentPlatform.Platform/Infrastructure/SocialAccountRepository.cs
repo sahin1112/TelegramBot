@@ -22,6 +22,22 @@ internal sealed class SocialAccountRepository(PlatformDbContext db) : ISocialAcc
     public async Task<IReadOnlyList<SocialAccount>> ListByPlatformAsync(PlatformKind platform, CancellationToken ct) =>
         await db.SocialAccounts.Where(x => x.Platform == platform).ToListAsync(ct);
 
+    public async Task<IReadOnlyList<PublicationTarget>> ListHomeTargetsAsync(CancellationToken ct) =>
+        await db.PublicationTargets
+            .Where(t => t.ShowOnHome && t.IsActive && t.PublicUrl != null && t.PublicUrl != "")
+            .OrderBy(t => t.Platform).ThenBy(t => t.Title)
+            .ToListAsync(ct);
+
+    public Task<bool> TargetExistsAsync(Guid socialAccountId, string externalTargetId, Guid? excludeTargetId, CancellationToken ct) =>
+        db.PublicationTargets.AnyAsync(x =>
+            x.SocialAccountId == socialAccountId
+            && x.ExternalTargetId == externalTargetId
+            && (excludeTargetId == null || x.Id != excludeTargetId), ct);
+
+    public void RemoveTarget(PublicationTarget target) => db.PublicationTargets.Remove(target);
+
+    public void RemoveAccount(SocialAccount account) => db.SocialAccounts.Remove(account);
+
     public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
 }
 

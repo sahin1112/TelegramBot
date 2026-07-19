@@ -51,17 +51,30 @@ internal sealed class PublicationRepository(PublishingDbContext db) : IPublicati
             .Where(x => x.Status == PublicationStatus.Scheduled && x.ScheduledAt != null && x.ScheduledAt <= now)
             .OrderBy(x => x.ScheduledAt).Take(take).ToListAsync(ct);
 
+    public async Task<bool> TryClaimScheduledAsync(Guid id, CancellationToken ct) =>
+        await db.Publications
+            .Where(x => x.Id == id && x.Status == PublicationStatus.Scheduled)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, PublicationStatus.Pending), ct) == 1;
+
     public async Task<IReadOnlyList<Publication>> GetScheduledAsync(int take, CancellationToken ct) =>
         await db.Publications
             .Where(x => x.Status == PublicationStatus.Scheduled)
             .OrderBy(x => x.ScheduledAt).Take(take).ToListAsync(ct);
 
-    public async Task<IReadOnlyList<DateTimeOffset>> GetScheduledTimesForCategoryAsync(Guid? categoryId, CancellationToken ct) =>
-        await db.Publications
-            .Where(x => x.Status == PublicationStatus.Scheduled && x.ScheduledAt != null && x.CategoryId == categoryId)
-            .Select(x => x.ScheduledAt!.Value)
+    public async Task<IReadOnlyList<DateTimeOffset>> GetScheduledTimesForCategoryAsync(Guid? categoryId, DateTimeOffset now, CancellationToken ct)
+    {
+        var since = now.AddDays(-2); // kadans için yakın geçmiş yeterli (günlük tavan + aralık)
+        return await db.Publications
+            .Where(x => x.CategoryId == categoryId && (
+                (x.Status == PublicationStatus.Scheduled && x.ScheduledAt != null) ||
+                (x.Status == PublicationStatus.Pending && x.CreatedAt >= since) ||
+                (x.Status == PublicationStatus.Published && x.PublishedAt != null && x.PublishedAt >= since)))
+            .Select(x => x.Status == PublicationStatus.Published
+                ? (x.ScheduledAt ?? x.PublishedAt!.Value)   // planlı gönderildiyse slot zamanı esas
+                : (x.ScheduledAt ?? x.CreatedAt))           // Pending = şimdi gönderiliyor sayılır
             .Distinct()
             .ToListAsync(ct);
+    }
 
     public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
 }

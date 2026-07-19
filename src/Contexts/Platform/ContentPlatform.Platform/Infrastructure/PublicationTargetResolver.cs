@@ -34,6 +34,8 @@ internal sealed class PublicationTargetResolver(PlatformDbContext db) : IPublica
         Channel.X => PlatformKind.X,
         Channel.Instagram => PlatformKind.Instagram,
         Channel.Threads => PlatformKind.Threads,
+        Channel.Youtube => PlatformKind.Youtube,
+        Channel.TikTok => PlatformKind.TikTok,
         _ => throw new NotSupportedException($"Kanal hedefe eşlenemez: {c}")
     };
 }

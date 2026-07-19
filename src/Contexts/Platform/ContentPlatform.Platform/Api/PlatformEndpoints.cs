@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Routing;
 
 namespace ContentPlatform.Platform.Api;
 
-/// <summary>Entegrasyonlar arayüzden: hesap oluştur, hedef ekle, listele. Kimlik ASLA düz dönmez.</summary>
+/// <summary>Entegrasyonlar arayüzden: hesap oluştur, hedef ekle/güncelle/sil, listele. Kimlik ASLA düz dönmez.</summary>
 internal static class PlatformEndpoints
 {
     public static void Map(IEndpointRouteBuilder app)
@@ -41,10 +41,36 @@ internal static class PlatformEndpoints
             return r.IsSuccess ? Results.Ok() : Results.NotFound(r.Error);
         });
 
+        // Hesabı (ve hedeflerini) kalıcı sil
+        g.MapDelete("/{id:guid}", async (Guid id, SocialAccountService svc, CancellationToken ct) =>
+        {
+            var r = await svc.DeleteAccountAsync(id, ct);
+            return r.IsSuccess ? Results.Ok() : Results.BadRequest(r.Error);
+        });
+
+        // ---- Hedef yönetimi ----
+        g.MapPut("/targets/{targetId:guid}", async (Guid targetId, UpdateTargetRequest req, SocialAccountService svc, CancellationToken ct) =>
+        {
+            var r = await svc.UpdateTargetAsync(targetId, req, ct);
+            return r.IsSuccess ? Results.Ok() : Results.BadRequest(r.Error);
+        });
+
         g.MapPost("/targets/{targetId:guid}/disable", async (Guid targetId, SocialAccountService svc, CancellationToken ct) =>
         {
             var r = await svc.DisableTargetAsync(targetId, ct);
             return r.IsSuccess ? Results.Ok() : Results.NotFound(r.Error);
+        });
+
+        g.MapPost("/targets/{targetId:guid}/enable", async (Guid targetId, SocialAccountService svc, CancellationToken ct) =>
+        {
+            var r = await svc.EnableTargetAsync(targetId, ct);
+            return r.IsSuccess ? Results.Ok() : Results.NotFound(r.Error);
+        });
+
+        g.MapDelete("/targets/{targetId:guid}", async (Guid targetId, SocialAccountService svc, CancellationToken ct) =>
+        {
+            var r = await svc.DeleteTargetAsync(targetId, ct);
+            return r.IsSuccess ? Results.Ok() : Results.BadRequest(r.Error);
         });
 
         // ---- Global ayarlar (API anahtarları/token/fiyat/kur) ----

@@ -29,6 +29,7 @@ public sealed class EditorialModule : IModule
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
         services.Configure<ContentPlatform.Abstractions.SiteOptions>(configuration.GetSection("Site"));
         services.AddSingleton<ICardRenderer, SkiaCardRenderer>();
+        services.AddSingleton<ISlideVideoRenderer, SlideVideoRenderer>(); // Reels/Shorts slayt videosu
         services.AddScoped<LocalMediaStore>();
         services.AddScoped<IMediaStore>(sp => sp.GetRequiredService<LocalMediaStore>());
         services.AddScoped<IMediaReader>(sp => sp.GetRequiredService<LocalMediaStore>());
@@ -36,6 +37,10 @@ public sealed class EditorialModule : IModule
         services.AddSingleton<IQualityGate, ContentQualityGate>();
         services.AddScoped<IContentAudit, ContentAuditStore>();
         services.AddScoped<IContentRepository, ContentRepository>();
+        // Kaynak makale metni çıkarıcı — AI üretimine sayfa KAYNAK KODU değil OKUNUR makale metni gider
+        // (kalite ↑, token maliyeti ↓). Çıkarılamazsa RSS özetine düşülür.
+        services.AddHttpClient(ArticleTextExtractor.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(20));
+        services.AddScoped<IArticleTextExtractor, ArticleTextExtractor>();
         services.AddScoped<IIntegrationEventHandler<ContentDiscoveredIntegrationEvent>, ContentDiscoveredHandler>();
         services.AddScoped<ContentGenerationService>();
         services.AddScoped<ManualContentService>();

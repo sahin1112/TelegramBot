@@ -1,13 +1,34 @@
 using System.Text.Json.Serialization;
 using ContentPlatform.Abstractions;
 using ContentPlatform.Api.Auth;
+using ContentPlatform.Api.Diagnostics;
 using ContentPlatform.SharedKernel;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // -------- Loglama (Serilog) --------
-builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console().WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "api-.log"), rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10));
+// Konsol + insan-okur metin + AYRI kritik hata gunlugu (api-errors) + Api/Worker ORTAK JSON (.clef).
+// JSON dosyasini /_diag/logs ucu okuyup Api+Worker loglarini birlestirir.
+builder.Host.UseSerilog((ctx, cfg) =>
+{
+    var logDir = ctx.Configuration["Diagnostics:LogDirectory"];
+    if (string.IsNullOrWhiteSpace(logDir))
+        logDir = System.IO.Path.Combine(AppContext.BaseDirectory, "logs");
+    System.IO.Directory.CreateDirectory(logDir);
+
+    cfg.ReadFrom.Configuration(ctx.Configuration)
+       .Enrich.FromLogContext()
+       .WriteTo.Console()
+       .WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "api-.log"),
+           rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10)
+       .WriteTo.File(System.IO.Path.Combine(AppContext.BaseDirectory, "logs", "api-errors-.log"),
+           restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Error,
+           rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 30)
+       .WriteTo.File(new ContentPlatform.Logging.JsonLogFormatter(),
+           System.IO.Path.Combine(logDir, "api-.clef"),
+           rollingInterval: Serilog.RollingInterval.Day, retainedFileCountLimit: 10);
+});
 
 // -------- Cross-cutting --------
 builder.Services.AddSingleton<IClock, SystemClock>();
@@ -22,7 +43,17 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<AuthTokenService>();
+
+// -------- Teşhis / uzaktan log akışı --------
+builder.Services.Configure<DiagnosticsOptions>(builder.Configuration.GetSection("Diagnostics"));
+builder.Services.AddSingleton<LogFeedReader>();
+
 builder.Services.AddOpenApi();
+
+// -------- Planlı yayın YEDEK göndericisi --------
+// Asıl gönderici Worker'daki ScheduledDispatchJob; Worker durursa bile planlı yayınlar bu
+// yedekle gider (atomik sahiplenme sayesinde ikisi aynı anda çalışsa da çifte gönderim olmaz).
+builder.Services.AddHostedService<ContentPlatform.Api.ScheduledDispatchFallbackService>();
 
 // -------- Performans: yanit sikistirma (Brotli/Gzip) --------
 builder.Services.AddResponseCompression(o =>
@@ -45,6 +76,19 @@ var modules = ModuleRegistrar.RegisterAll(builder.Services, builder.Configuratio
 
 var app = builder.Build();
 
+// -------- Global hata yakalama --------
+// İşlenmeyen her istisnayı kritik günlüğe yazar ve panele temiz bir JSON mesajı döndürür
+// (ham 500 yerine). Pipeline'ın EN BAŞINDA olmalı ki tüm alt katmanları sarsın.
+app.UseExceptionHandler(errApp => errApp.Run(async context =>
+{
+    var feature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+    var ex = feature?.Error;
+    Log.Error(ex, "İşlenmeyen hata: {Method} {Path}", context.Request.Method, context.Request.Path);
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsJsonAsync(new { message = "Sunucu hatası oluştu. Ayrıntı için sunucu günlüklerine (logs/api-errors) bakın." });
+}));
+
 app.UseSerilogRequestLogging();
 app.UseResponseCompression();
 app.UseDefaultFiles();
@@ -62,14 +106,15 @@ app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
 app.UseMiddleware<AuthMiddleware>(); // /api/v1/* korumalı (login hariç)
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 
-// Kök (/) -> herkese açık blog; panel yalnız /HmbAdmin ile açılır.
-app.MapGet("/", () => Results.Redirect("/blog")).ExcludeFromDescription();
+// Kök (/) artık Site modülünde ana sayfayı DOĞRUDAN render eder (redirect yok) → GTM/GA etiketi kökte de bulunur.
+// Panel yalnız /HmbAdmin ile açılır.
 app.MapGet("/HmbAdmin", () => Results.Redirect("/admin/index.html")).ExcludeFromDescription();
 app.MapGet("/health", () => Results.Ok(new { status = "ok", modules = modules.Select(m => m.Name) }))
    .WithTags("System");
 
 // Modül endpoint'leri
 AuthEndpoints.Map(app);
+DiagnosticsEndpoints.Map(app); // /_diag/logs (gizli anahtar) + /api/v1/logs (admin)
 ModuleRegistrar.MapAll(app, modules);
 
 Log.Information("İçerik Platformu API başladı. Modüller: {Modules}", string.Join(", ", modules.Select(m => m.Name)));

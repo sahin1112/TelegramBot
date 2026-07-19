@@ -2,6 +2,7 @@ using System.Text.Json;
 using ContentPlatform.Abstractions;
 using ContentPlatform.Editorial.Contracts;
 using ContentPlatform.Editorial.Domain;
+using ContentPlatform.Editorial.Infrastructure;
 using ContentPlatform.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -21,16 +22,21 @@ public sealed class ContentGenerationService(
     ITextGenerationProvider textProvider,
     IImageGenerationProvider imageProvider,
     ICardRenderer cardRenderer,
+    ISlideVideoRenderer videoRenderer,
     IMediaStore mediaStore,
+    IMediaReader mediaReader,
+    ISettingsProvider settingsProvider,
     IIntegrationEventPublisher bus,
     IQualityGate qualityGate,
     IContentAudit audit,
+    IArticleTextExtractor articleExtractor,
+    IPublicCategoryProvider categoryProvider,
     IKillSwitch killSwitch,
     IClock clock,
     IOptions<SiteOptions> siteOptions,
+    IOptions<MediaOptions> mediaOptions,
     ILogger<ContentGenerationService> logger)
 {
-    private const int CardW = 1200, CardH = 675;
 
     private const string SystemPrompt =
         "Sen SEO odakli bir HABER/icerik editorusun. Kaynak metni Turkce, ozgun, telifsiz ve ARAMA MOTORU DOSTU sekilde AKTAR; kaynakta olmayan isim/veri/bilgi UYDURMA. " +
@@ -69,8 +75,9 @@ public sealed class ContentGenerationService(
                 if (item.UseAi && current is null)
                 {
                     // AI metni üret — YALNIZ henüz revizyon yoksa. Elle üretilen/düzenlenen içerik korunur (ezilmez).
-                    var input = $"Baslik: {item.RawTitle}\n\nMetin: {item.RawInput}";
-                    f = await RunTextAsync(input, item.RawTitle, ct);
+                    // Girdi: kaynak sayfadan çıkarılan TAM makale metni (varsa) — yoksa RSS özeti.
+                    var input = await BuildAiInputAsync(item, ct);
+                    f = await RunTextAsync(input, item.RawTitle, allowPartial: false, ct); // otomatik hat: TAM içerik şart
                     item.AddRevision(new ContentRevision(
                         item.Id, item.Revisions.Count + 1, f.Title, f.ShortX, f.BodyHtml, f.InstagramCaption,
                         f.Tags.ToList(), f.PrimaryKeyword, f.ImageAltText, createdBy: "ai", clock));
@@ -91,12 +98,23 @@ public sealed class ContentGenerationService(
                     continue;
                 }
 
-                var (url, kind, w, h) = await BuildImageAsync(item.ImageSource, f.Title, ct);
-                item.AddMedia(kind, url, w, h, titleBurned: kind == MediaKind.SkiaCard, clock);
-                item.MarkMediaReady(clock);
+                string? mediaUrl;
+                if (item.MediaStatus == MediaStatus.Ready && LatestImageUrl(item) is { } readyUrl)
+                {
+                    // Görsel zaten (önizlemeden) üretilmiş/yüklenmiş — yeniden üretme, mevcutla yayına gönder.
+                    // (Video medyası GÖRSEL sayılmaz — LatestImageUrl videoyu atlar.)
+                    mediaUrl = readyUrl;
+                }
+                else
+                {
+                    var (url, kind, w, h) = await BuildImageAsync(item.ImageSource, f.Title, null, ct);
+                    item.AddMedia(kind, url, w, h, titleBurned: kind == MediaKind.SkiaCard, clock);
+                    item.MarkMediaReady(clock);
+                    mediaUrl = url;
+                }
                 await repository.SaveChangesAsync(ct);
 
-                await MaybePublishAsync(item, f, url, ct);
+                await MaybePublishAsync(item, f, mediaUrl, ct);
                 produced++;
             }
             catch (Exception ex)
@@ -120,7 +138,8 @@ public sealed class ContentGenerationService(
         if (item.MediaStatus != MediaStatus.AwaitingManualUpload)
             return Result.Failure(Error.Conflict("İçerik elle görsel beklemiyor."));
 
-        var url = await mediaStore.SaveAsync(bytes, contentType, ct);
+        var (optBytes, optType) = OptimizeUpload(bytes, contentType, logger);
+        var url = await mediaStore.SaveAsync(optBytes, optType, ct);
         item.AddMedia(MediaKind.Manual, url, 0, 0, titleBurned: false, clock);
         item.MarkMediaReady(clock);
         await repository.SaveChangesAsync(ct);
@@ -137,7 +156,7 @@ public sealed class ContentGenerationService(
     /// Detay/panel ekranından görseli HEMEN üretir (AI veya SkiaCard) — YAYINLAMAZ, yalnız önizleme/hazırlık.
     /// Manual seçilirse görsel üretmez; içeriği elle yüklemeye hazır hale getirir. Üretilen görselin URL'sini döner.
     /// </summary>
-    public async Task<Result<string?>> GeneratePreviewImageAsync(Guid contentItemId, ImageSource source, CancellationToken ct)
+    public async Task<Result<string?>> GeneratePreviewImageAsync(Guid contentItemId, ImageSource source, int? cardStyle, CancellationToken ct)
     {
         var item = await repository.GetAsync(contentItemId, ct);
         if (item is null) return Result.Failure<string?>(Error.NotFound("İçerik"));
@@ -153,10 +172,13 @@ public sealed class ContentGenerationService(
         try
         {
             var title = item.Revisions.FirstOrDefault(r => r.IsCurrent)?.Title ?? item.RawTitle ?? "Başlık";
-            var (url, kind, w, h) = await BuildImageAsync(source, title, ct);
+            // SkiaCard için: seçili şablon varsa onu, yoksa RASTGELE (her basışta farklı tasarım). AI'da yok sayılır.
+            var theme = cardStyle is { } cs ? cs.ToString() : System.Random.Shared.Next(0, 24).ToString();
+            var (url, kind, w, h) = await BuildImageAsync(source, title, theme, ct);
             item.AddMedia(kind, url, w, h, titleBurned: kind == MediaKind.SkiaCard, clock);
             item.MarkMediaReady(clock);
             await repository.SaveChangesAsync(ct);
+            await PublishIfApprovedAsync(item, url, ct); // onaylı içerik burada takılıp kalmasın
             return Result.Success<string?>(url);
         }
         catch (Exception ex)
@@ -172,12 +194,54 @@ public sealed class ContentGenerationService(
         var item = await repository.GetAsync(contentItemId, ct);
         if (item is null) return Result.Failure<string>(Error.NotFound("İçerik"));
 
-        var url = await mediaStore.SaveAsync(bytes, contentType, ct);
+        var (optBytes, optType) = OptimizeUpload(bytes, contentType, logger);
+        var url = await mediaStore.SaveAsync(optBytes, optType, ct);
         item.SetImageSource(ImageSource.Manual, clock);
         item.AddMedia(MediaKind.Manual, url, 0, 0, titleBurned: false, clock);
         item.MarkMediaReady(clock);
         await repository.SaveChangesAsync(ct);
+        await PublishIfApprovedAsync(item, url, ct); // onaylı içerik burada takılıp kalmasın
         return Result.Success(url);
+    }
+
+    /// <summary>
+    /// Kullanıcının yüklediği görseli GÖRSEL KALİTEYİ BOZMADAN küçültür (disk + sayfa hızı):
+    ///  - En uzun kenar 1600px'i aşıyorsa yüksek kaliteli (Mitchell cubic) yeniden örnekleme ile 1600'e iner
+    ///    (sitede kapak ~1200px, Instagram 1080px ister → 1600 her kullanım için fazlasıyla yeterli).
+    ///  - JPEG kalite 85 ile kodlanır (görsel olarak kayıpsız kabul edilen eşik).
+    ///  - Sonuç orijinalden BÜYÜK çıkarsa orijinal korunur (zaten optimize dosya şişirilmez).
+    ///  - Çözülemeyen/bozuk dosyada orijinal aynen kaydedilir (yükleme asla bu yüzden patlamaz).
+    /// </summary>
+    internal static (byte[] Bytes, string ContentType) OptimizeUpload(byte[] bytes, string contentType, ILogger? log = null)
+    {
+        try
+        {
+            using var bmp = SkiaSharp.SKBitmap.Decode(bytes);
+            if (bmp is null) return (bytes, contentType);
+
+            const int MaxDim = 1600;
+            var maxSide = Math.Max(bmp.Width, bmp.Height);
+            SkiaSharp.SKBitmap final = bmp;
+            if (maxSide > MaxDim)
+            {
+                var scale = MaxDim / (float)maxSide;
+                var nw = Math.Max(1, (int)Math.Round(bmp.Width * scale));
+                var nh = Math.Max(1, (int)Math.Round(bmp.Height * scale));
+                final = bmp.Resize(new SkiaSharp.SKImageInfo(nw, nh),
+                    new SkiaSharp.SKSamplingOptions(SkiaSharp.SKCubicResampler.Mitchell)) ?? bmp;
+            }
+
+            using var img = SkiaSharp.SKImage.FromBitmap(final);
+            using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 85);
+            var jpeg = data.ToArray();
+            if (!ReferenceEquals(final, bmp)) final.Dispose();
+
+            if (jpeg.Length >= bytes.Length) return (bytes, contentType); // küçülmediyse dokunma
+            log?.LogInformation("Yüklenen görsel optimize edildi: {Once} KB → {Sonra} KB",
+                bytes.Length / 1024, jpeg.Length / 1024);
+            return (jpeg, "image/jpeg");
+        }
+        catch { return (bytes, contentType); }
     }
 
     /// <summary>AI görsel istemi: gerçekçi + dikkat çekici editoryal kapak; başlık tasarıma şık gömülür.</summary>
@@ -188,26 +252,58 @@ public sealed class ContentGenerationService(
         $"Gorselin uzerine, tasarima SIK bir sekilde entegre, BUYUK ve OKUNAKLI modern bir tipografiyle su baslik DOGRU sekilde yazilsin: \"{title}\". " +
         "Baslik net, hatasiz, gorsel hiyerarside one cikan bir manset gibi olsun; okunabilirlik icin gerekli yerde hafif koyu zemin/gradyan kullan.";
 
-    private async Task<(string Url, MediaKind Kind, int W, int H)> BuildImageAsync(ImageSource source, string title, CancellationToken ct)
+    private async Task<(string Url, MediaKind Kind, int W, int H)> BuildImageAsync(ImageSource source, string title, string? cardTheme, CancellationToken ct)
     {
+        var (cardW, cardH) = CardSize();
         if (source == ImageSource.Ai)
         {
+            var (aiW, aiH) = AiImageSize(cardW, cardH);
             try
             {
                 var img = await imageProvider.GenerateAsync(
-                    new ImageGenerationRequest(BuildAiImagePrompt(title), 1024, 1024, "high"), ct);
+                    new ImageGenerationRequest(BuildAiImagePrompt(title), aiW, aiH, "high"), ct);
                 if (img.Bytes.Length > 0)
                 {
                     var aiUrl = await mediaStore.SaveAsync(img.Bytes, img.ContentType, ct);
-                    return (aiUrl, MediaKind.AiImage, 1024, 1024);
+                    return (aiUrl, MediaKind.AiImage, aiW, aiH);
                 }
             }
             catch (Exception ex) { logger.LogWarning(ex, "AI gorsel basarisiz, SkiaCard'a dusuluyor."); }
         }
 
-        var card = cardRenderer.RenderTitleCard(title, null, CardW, CardH);
+        var card = cardRenderer.RenderTitleCard(title, cardTheme, cardW, cardH);
         var url = await mediaStore.SaveAsync(card, "image/png", ct);
-        return (url, MediaKind.SkiaCard, CardW, CardH);
+        return (url, MediaKind.SkiaCard, cardW, cardH);
+    }
+
+    /// <summary>Kart boyutu config'ten (Media:CardWidth/Height) — Instagram/X/Telegram için ORTAK boyut.</summary>
+    private (int W, int H) CardSize()
+    {
+        var o = mediaOptions.Value;
+        return (o.CardWidth > 0 ? o.CardWidth : 1080, o.CardHeight > 0 ? o.CardHeight : 1080);
+    }
+
+    /// <summary>Kart oranına en yakın OpenAI görsel boyutu — kart ile AI görsel AYNI oranda kalsın.</summary>
+    private static (int W, int H) AiImageSize(int cardW, int cardH)
+    {
+        var ratio = (double)cardW / cardH;
+        if (ratio > 1.15) return (1536, 1024);  // yatay
+        if (ratio < 0.87) return (1024, 1536);  // dikey
+        return (1024, 1024);                    // kare
+    }
+
+    /// <summary>
+    /// İçerik ZATEN onaylıyken görsel sonradan hazır olursa yayını tetikler. (Üretim sorgusu
+    /// "Ready medya + güncel revizyon" içeriği almaz; bu çağrı olmasa içerik sessizce takılırdı.)
+    /// </summary>
+    private async Task PublishIfApprovedAsync(ContentItem item, string? mediaUrl, CancellationToken ct)
+    {
+        if (item.EditorialStatus != EditorialStatus.Approved) return;
+        var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
+        if (rev is null) return; // metin yok → PipelineDrainJob metni üretince yayınlar
+        await MaybePublishAsync(item,
+            new Fields(rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags, rev.PrimaryKeyword, rev.ImageAltText),
+            mediaUrl, ct);
     }
 
     /// <summary>Kalite kapısı: kritik sorun varsa içeriği incelemeye alır (yayınlamaz); yoksa yayına-hazır olayı.</summary>
@@ -237,7 +333,8 @@ public sealed class ContentGenerationService(
         var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
         if (rev is null) return Result.Failure(Error.Conflict("Yayınlanacak güncel revizyon yok."));
         if (item.MediaStatus != MediaStatus.Ready) return Result.Failure(Error.Conflict("Görsel hazır değil (önce üretim/yükleme)."));
-        var mediaUrl = item.Media.LastOrDefault()?.Url;
+        var mediaUrl = LatestImageUrl(item); // video medyası görsel olarak gitmesin
+        if (mediaUrl is null) return Result.Failure(Error.Conflict("Görsel yok — yalnız video ile yayına alınamaz; önce görsel üret/yükle."));
         await PublishReadyAsync(item,
             new Fields(rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags, rev.PrimaryKeyword, rev.ImageAltText),
             mediaUrl, ct, adGate);
@@ -246,16 +343,114 @@ public sealed class ContentGenerationService(
 
     private Task PublishReadyAsync(ContentItem item, Fields f, string? mediaUrl, CancellationToken ct, bool adGate = false)
     {
-        // Blog linki: test içeriği bloglanmaz → linksiz. Aksi halde Site ile AYNI slug formülü (BlogSlug).
+        // NORMAL yayın akışı ARTIK test bayrağından bağımsız: içerik test'e gönderilmiş olsa bile
+        // zamanı gelince GERÇEK hedeflere planlanır/yayınlanır ve bloga girer. Test, ayrı ve tek
+        // seferlik bir aksiyondur (SendTestAsync) — içeriği asıl akıştan ÇIKARMAZ.
         string? link = null;
         var baseUrl = siteOptions.Value.BaseUrlTrimmed;
-        if (!item.TestMode && baseUrl.Length > 0)
+        if (baseUrl.Length > 0)
             link = $"{baseUrl}/blog/{BlogSlug.Build(item.Id, f.PrimaryKeyword, f.Title)}";
 
         return bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
-            Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, item.TestMode,
+            Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, TestMode: false,
             f.Title, f.ShortX, f.BodyHtml, f.InstagramCaption, f.Tags.ToList(), f.PrimaryKeyword, mediaUrl,
-            Link: link, ScheduledAt: item.ScheduledAt, AdGate: adGate), ct);
+            Link: link, ScheduledAt: item.ScheduledAt, AdGate: adGate, VideoUrl: LatestVideoUrl(item)), ct);
+    }
+
+    /// <summary>
+    /// İçeriği TEST hedeflerine TEK SEFERLİK, HEMEN gönderir (kadans/plan yok, blog yok).
+    /// İçeriğin asıl yayın akışını DEĞİŞTİRMEZ — normal planlama/yayın aynen devam eder.
+    /// </summary>
+    public async Task<Result> SendTestAsync(Guid contentItemId, CancellationToken ct)
+    {
+        var item = await repository.GetAsync(contentItemId, ct);
+        if (item is null) return Result.Failure(Error.NotFound("İçerik"));
+        var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
+        if (rev is null) return Result.Failure(Error.Conflict("Gönderilecek güncel revizyon yok (önce üret/kaydet)."));
+        if (item.MediaStatus != MediaStatus.Ready) return Result.Failure(Error.Conflict("Görsel hazır değil (önce üret/yükle)."));
+        var mediaUrl = LatestImageUrl(item); // video medyası görsel olarak gitmesin
+
+        await bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
+            Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, TestMode: true,
+            rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags.ToList(), rev.PrimaryKeyword, mediaUrl,
+            Link: null, ScheduledAt: null, AdGate: false, VideoUrl: LatestVideoUrl(item)), ct);
+        return Result.Success();
+    }
+
+    /// <summary>Son GÖRSEL (video hariç) medya URL'i.</summary>
+    private static string? LatestImageUrl(ContentItem item) =>
+        item.Media.LastOrDefault(m => m.Kind != MediaKind.Video)?.Url;
+
+    /// <summary>Son VİDEO medya URL'i (Reels/Shorts slayt videosu).</summary>
+    private static string? LatestVideoUrl(ContentItem item) =>
+        item.Media.LastOrDefault(m => m.Kind == MediaKind.Video)?.Url;
+
+    /// <summary>
+    /// Reels/Shorts/TikTok için slayt videosu üretir (X metni → 3 sayfa × 7 sn = 21 sn, 1080x1920).
+    /// YAYINLAMAZ — önizleme; yayında IG/YouTube/TikTok'a video varsa video gider, yoksa görsel.
+    /// </summary>
+    public async Task<Result<string?>> GeneratePreviewVideoAsync(Guid contentItemId, int? style, CancellationToken ct)
+    {
+        var item = await repository.GetAsync(contentItemId, ct);
+        if (item is null) return Result.Failure<string?>(Error.NotFound("İçerik"));
+
+        var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
+        var title = rev?.Title ?? item.RawTitle ?? "Başlık";
+        var text = rev?.ShortX;
+        if (string.IsNullOrWhiteSpace(text))
+            return Result.Failure<string?>(Error.Conflict("Video için X metni gerekli — önce metni üret/kaydet."));
+
+        try
+        {
+            // Arka plan müziği (panelden yüklenen mp3 — video.music_url). Yoksa sessiz video.
+            byte[]? music = null;
+            var musicUrl = await settingsProvider.GetAsync("video.music_url", ct);
+            if (!string.IsNullOrWhiteSpace(musicUrl))
+                music = (await mediaReader.TryReadAsync(musicUrl!, ct))?.Bytes;
+
+            // Kategori adı slaytlara basılır (ne haberi olduğu anlaşılsın diye).
+            string? category = null;
+            if (item.CategoryId is { } catId)
+                category = (await categoryProvider.GetActiveAsync(ct)).FirstOrDefault(c => c.Id == catId)?.Name;
+
+            var bytes = await videoRenderer.RenderSlidesVideoAsync(title, text!, music, style, category, ct);
+            var url = await mediaStore.SaveAsync(bytes, "video/mp4", ct);
+            var o = mediaOptions.Value;
+            item.AddMedia(MediaKind.Video, url, o.VideoWidth > 0 ? o.VideoWidth : 1080,
+                o.VideoHeight > 0 ? o.VideoHeight : 1920, titleBurned: true, clock);
+            // GÖRSEL yoksa içerik yayına GİREMEZ (video tek başına yetmez) → "Görsel Bekleyenler"de görünür,
+            // kaybolmaz. Görsel üretilince/yüklenince normal akış devam eder.
+            if (LatestImageUrl(item) is null && item.MediaStatus != MediaStatus.Ready)
+                item.MarkAwaitingManualImage(clock);
+            await repository.SaveChangesAsync(ct);
+            audit.Log(item.Id, AuditEvent.Generated, ActorType.AdminUser, "admin", "Slayt videosu üretildi");
+            return Result.Success<string?>(url);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Video üretilemedi: {Id}", contentItemId);
+            return Result.Failure<string?>(Error.Conflict("Video üretilemedi: " + ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// AI üretim girdisini kurar: SourceUrl varsa (RSS/ingestion) kaynak sayfadan OKUNUR makale metni
+    /// çıkarılır ve o gönderilir (kaynak kodu değil → token israfı yok, içerik zengin). Çıkarılamazsa
+    /// RSS özetine (RawInput) düşülür. Özgünlük talimatı eklenir — kaynaktan cümle kopyalanmaz.
+    /// </summary>
+    private async Task<string> BuildAiInputAsync(ContentItem item, CancellationToken ct)
+    {
+        var fallback = $"Baslik: {item.RawTitle}\n\nMetin: {item.RawInput}";
+        if (string.IsNullOrWhiteSpace(item.SourceUrl)) return fallback;
+
+        var article = await articleExtractor.ExtractAsync(item.SourceUrl!, ct);
+        if (string.IsNullOrWhiteSpace(article)) return fallback;
+
+        logger.LogInformation("Kaynak makale metni alındı ({Len} kr): {Url}", article!.Length, item.SourceUrl);
+        return $"Baslik: {item.RawTitle}\n\n" +
+               "KAYNAK MAKALENIN TAM METNI asagida. Bu metni OZGUN sekilde, kendi cumlelerinle YENIDEN YAZ; " +
+               "cumleleri birebir KOPYALAMA/cevirme. Kaynaktaki tum onemli bilgi, veri ve atiflari koru; olmayani uydurma.\n\n" +
+               $"--- KAYNAK MAKALE ---\n{article}";
     }
 
     // ---- Elle (panel) AI üretimi ----
@@ -269,10 +464,13 @@ public sealed class ContentGenerationService(
         var item = await repository.GetAsync(contentItemId, ct);
         if (item is null) return Result.Failure(Error.NotFound("İçerik"));
 
-        var input = !string.IsNullOrWhiteSpace(seedInput) ? seedInput! : $"Baslik: {item.RawTitle}\n\nMetin: {item.RawInput}";
+        // Girdi önceliği: (1) panelden verilen not/seed, (2) kaynak sayfadan çıkarılan TAM makale metni,
+        // (3) RSS özeti. Böylece "tüm alanları üret" kaynaktaki gerçek makaleyle beslenir → kaliteli + özgün.
+        var input = !string.IsNullOrWhiteSpace(seedInput) ? seedInput! : await BuildAiInputAsync(item, ct);
         try
         {
-            var f = await RunTextAsync(input, item.RawTitle, ct);
+            // Panelden üretim: KISMİ sonuç da kabul (hiç doldurmamaktan iyidir; eksik alan ✨ ile tamamlanır).
+            var f = await RunTextAsync(input, item.RawTitle, allowPartial: true, ct);
             var nextNo = (item.Revisions.Count == 0 ? 0 : item.Revisions.Max(r => r.RevisionNumber)) + 1;
             item.AddRevision(new ContentRevision(item.Id, nextNo, f.Title, f.ShortX, f.BodyHtml,
                 f.InstagramCaption, f.Tags.ToList(), f.PrimaryKeyword, f.ImageAltText, createdBy: "ai-manual", clock));
@@ -289,7 +487,7 @@ public sealed class ContentGenerationService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Panelden AI üretimi başarısız: {Id}", contentItemId);
-            return Result.Failure(Error.Conflict("AI üretimi başarısız: " + ex.Message));
+            return Result.Failure(Error.Conflict("AI üretimi başarısız: " + FriendlyAiError(ex)));
         }
     }
 
@@ -305,21 +503,109 @@ public sealed class ContentGenerationService(
         var context = $"Başlık: {req.Title}\n\nKısa (X): {req.ShortX}\n\nAna metin (HTML): {req.BodyHtml}\n\nInstagram: {req.InstagramCaption}\n\nKaynak/not: {req.RawInput}";
         try
         {
-            var result = await textProvider.GenerateAsync(new TextGenerationRequest(system, context, "tr", "v1"), ct);
+            var result = await GenerateWithNetRetryAsync(new TextGenerationRequest(system, context, "tr", "v1"), ct);
             return Result.Success(CleanPlain(result.RawJson));
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Alan üretimi başarısız: {Field}", req.Field);
-            return Result.Failure<string>(Error.Conflict("AI üretimi başarısız: " + ex.Message));
+            return Result.Failure<string>(Error.Conflict("AI üretimi başarısız: " + FriendlyAiError(ex)));
         }
     }
 
-    private async Task<Fields> RunTextAsync(string input, string? fallbackTitle, CancellationToken ct)
+    private async Task<Fields> RunTextAsync(string input, string? fallbackTitle, bool allowPartial, CancellationToken ct)
     {
-        var result = await textProvider.GenerateAsync(new TextGenerationRequest(SystemPrompt, input, "tr", "v1"), ct);
-        return ParseFields(result.RawJson, fallbackTitle ?? "Baslik");
+        // 1. deneme (anlık ağ/DNS kopmasında 2 sn arayla bir kez daha denenir)
+        var result = await GenerateWithNetRetryAsync(new TextGenerationRequest(SystemPrompt, input, "tr", "v1"), ct);
+        var first = ParseFields(result.RawJson, fallbackTitle ?? "Baslik");
+        if (IsUsable(first)) return first;
+
+        // Kritik alanlar boş/eksik → TEK otomatik düzeltme denemesi (kullanıcı 4-5 kez basmasın).
+        logger.LogWarning("AI çıktısı eksik/parse edilemedi, otomatik yeniden deneniyor. İlk 200: {Raw}",
+            result.RawJson.Length > 200 ? result.RawJson[..200] : result.RawJson);
+        var strict = SystemPrompt +
+            " SON UYARI: Cikti SADECE tek bir GECERLI JSON NESNESI olacak — kod citi (```), aciklama, giris cumlesi, JSON disinda TEK KARAKTER bile YOK. " +
+            "TUM alanlar DOLU olacak: title, shortX, bodyHtml (en az 600 kelime), instagramCaption, tags, primaryKeyword, imageAltText.";
+        Fields second;
+        string retryRaw;
+        try
+        {
+            var retry = await GenerateWithNetRetryAsync(new TextGenerationRequest(strict, input, "tr", "v1"), ct);
+            retryRaw = retry.RawJson;
+            second = ParseFields(retryRaw, fallbackTitle ?? "Baslik");
+        }
+        catch (Exception ex) when (allowPartial && HasAnyContent(first))
+        {
+            // Düzeltme denemesi ağda/serviste düştü ama ilk denemeden işe yarar alanlar var → onları kullan.
+            logger.LogWarning(ex, "Düzeltme denemesi başarısız — ilk denemenin KISMİ sonucu kullanılıyor.");
+            return first;
+        }
+        if (IsUsable(second)) return second;
+
+        // İki denemenin EN İYİ alanlarını birleştir. Panelden üretimde KISMİ sonuç da doldurulur —
+        // hiç doldurmamaktan iyidir (eski davranış); eksik alanlar boş kalır, ✨ tek-alan üretimiyle tamamlanır.
+        var merged = MergeBest(first, second);
+        if (allowPartial && HasAnyContent(merged))
+        {
+            logger.LogWarning("AI çıktısı kısmi — eldeki alanlar panele dolduruldu (bazıları eksik olabilir).");
+            return merged;
+        }
+
+        // Hâlâ olmadı → SESSİZCE boş dönme, açık hata ver (panelde sebep görünsün).
+        var peek = retryRaw.Trim();
+        throw new InvalidOperationException(
+            "AI beklenen formatta içerik dönmedi (title/shortX/bodyHtml eksik). Model çıktısının başı: " +
+            (peek.Length > 220 ? peek[..220] : peek));
     }
+
+    /// <summary>Anlık ağ/DNS kopmasında ("No such host", zaman aşımı) 2 sn bekleyip BİR kez daha dener.
+    /// DNS bazen tek istekte çözülemiyor; ikinci deneme çoğu anlık kopmayı kurtarır. 401 gibi API
+    /// hataları HttpRequestException DEĞİLDİR — onlarda tekrar denenmez (aynı hatayı verir).</summary>
+    private async Task<TextGenerationResult> GenerateWithNetRetryAsync(TextGenerationRequest req, CancellationToken ct)
+    {
+        try { return await textProvider.GenerateAsync(req, ct); }
+        catch (HttpRequestException ex)
+        {
+            logger.LogWarning(ex, "OpenAI ağ hatası — 2 sn sonra bir kez daha denenecek.");
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            return await textProvider.GenerateAsync(req, ct);
+        }
+    }
+
+    /// <summary>İki denemenin alan alan EN DOLU olanını seçer (1. deneme body, 2. deneme shortX getirmiş olabilir).</summary>
+    private static Fields MergeBest(Fields a, Fields b) => new(
+        Longer(a.Title, b.Title), Longer(a.ShortX, b.ShortX), Longer(a.BodyHtml, b.BodyHtml),
+        (b.InstagramCaption?.Length ?? 0) > (a.InstagramCaption?.Length ?? 0) ? b.InstagramCaption : a.InstagramCaption,
+        b.Tags.Count > a.Tags.Count ? b.Tags : a.Tags,
+        a.PrimaryKeyword ?? b.PrimaryKeyword,
+        a.ImageAltText ?? b.ImageAltText);
+
+    private static string Longer(string x, string y) => (y?.Length ?? 0) > (x?.Length ?? 0) ? y : x;
+
+    /// <summary>Panele doldurmaya değer HERHANGİ bir alan var mı? (Title sayılmaz — fallback'ten hep dolu.)</summary>
+    private static bool HasAnyContent(Fields f) =>
+        !string.IsNullOrWhiteSpace(f.ShortX) || (f.BodyHtml?.Length ?? 0) >= 50 ||
+        !string.IsNullOrWhiteSpace(f.InstagramCaption) || f.Tags.Count > 0;
+
+    /// <summary>Teknik hata metnini panelde anlaşılır hale getirir (ne yapılacağı yazsın).</summary>
+    private static string FriendlyAiError(Exception ex)
+    {
+        var m = ex.Message;
+        if (ex is HttpRequestException && (m.Contains("No such host", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("connection attempt", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("timed out", StringComparison.OrdinalIgnoreCase)))
+            return "Sunucu api.openai.com'a ULAŞAMIYOR (DNS/ağ sorunu — kod değil). Sunucunun DNS ayarına 8.8.8.8 / 1.1.1.1 ekleyin, " +
+                   "'ipconfig /flushdns' çalıştırın ve güvenlik duvarının 443 çıkışına izin verdiğini kontrol edin. Teknik: " + m;
+        if (m.Contains("insufficient permissions", StringComparison.OrdinalIgnoreCase))
+            return m + " → API anahtarınız bu MODELE erişemiyor. Ayarlar'daki model adını erişiminiz olan bir modelle değiştirin " +
+                   "ya da platform.openai.com'da anahtarın izinlerini (Restricted → All / model erişimi) genişletin.";
+        return m;
+    }
+
+    /// <summary>Kritik alanlar dolu mu? (başlık + X metni + en az ~150 karakter gövde)</summary>
+    private static bool IsUsable(Fields f) =>
+        !string.IsNullOrWhiteSpace(f.Title) && !string.IsNullOrWhiteSpace(f.ShortX) &&
+        (f.BodyHtml?.Length ?? 0) >= 150;
 
     private static string? FieldPrompt(string field) => field switch
     {
@@ -345,26 +631,85 @@ public sealed class ContentGenerationService(
         return s.Trim().Trim('"').Trim();
     }
 
-    private static Fields ParseFields(string json, string fallbackTitle)
+    /// <summary>Model çıktısından JSON gövdesini söker: kod çiti (```), baştaki/sondaki açıklama lafları
+    /// temizlenir; olmadı ilk '{' ile son '}' arası denenir. json_object modu buna rağmen bazen deleniyor.</summary>
+    internal static string ExtractJson(string raw)
+    {
+        var s = (raw ?? "").Trim();
+        if (s.StartsWith("```"))
+        {
+            var nl = s.IndexOf('\n');
+            if (nl >= 0) s = s[(nl + 1)..];
+            var fence = s.LastIndexOf("```", StringComparison.Ordinal);
+            if (fence >= 0) s = s[..fence];
+            s = s.Trim();
+        }
+        if (s.StartsWith('{') && s.EndsWith('}')) return s;
+        var i = s.IndexOf('{');
+        var j = s.LastIndexOf('}');
+        return i >= 0 && j > i ? s[i..(j + 1)] : s;
+    }
+
+    internal static Fields ParseFields(string json, string fallbackTitle)
     {
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var r = doc.RootElement;
-            string S(string k, string d = "") => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : d;
-            var tags = r.TryGetProperty("tags", out var t) && t.ValueKind == JsonValueKind.Array
-                ? t.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToList()
-                : new List<string>();
+            using var doc = JsonDocument.Parse(ExtractJson(json));
+            // Alan adları TOLERANSLI: büyük/küçük harf + snake_case/kebab-case ("body_html" = "bodyHtml").
+            var map = NormalizedMap(doc.RootElement);
+            // Alanlar kökte değil TEK bir iç nesnede olabilir ({"data":{...}}, {"article":{...}}) → içeri gir.
+            if (!map.ContainsKey("title") && !map.ContainsKey("bodyhtml"))
+                foreach (var v in map.Values)
+                    if (v.ValueKind == JsonValueKind.Object)
+                    {
+                        var inner = NormalizedMap(v);
+                        if (inner.ContainsKey("title") || inner.ContainsKey("bodyhtml")) { map = inner; break; }
+                    }
+
+            // İlk DOLU string'i döndür (eş anlamlı alan adları sırayla denenir).
+            string S(params string[] keys)
+            {
+                foreach (var k in keys)
+                    if (map.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrWhiteSpace(v.GetString()))
+                        return v.GetString()!;
+                return "";
+            }
+
+            // tags: dizi YA DA virgüllü string kabul edilir
+            var tags = new List<string>();
+            if (map.TryGetValue("tags", out var t) || map.TryGetValue("etiketler", out t) || map.TryGetValue("keywords", out t))
+            {
+                if (t.ValueKind == JsonValueKind.Array)
+                    tags = t.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToList();
+                else if (t.ValueKind == JsonValueKind.String)
+                    tags = t.GetString()!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            }
+
+            var title = S("title", "baslik", "başlık", "headline");
             return new Fields(
-                S("title", fallbackTitle), S("shortX"), S("bodyHtml"),
-                S("instagramCaption") is { Length: > 0 } ig ? ig : null,
-                tags, S("primaryKeyword") is { Length: > 0 } pk ? pk : null,
-                S("imageAltText") is { Length: > 0 } alt ? alt : null);
+                title is { Length: > 0 } ? title : fallbackTitle,
+                S("shortx", "xtext", "tweet", "xpost", "shorttext"),
+                S("bodyhtml", "body", "html", "content", "article", "bodytext"),
+                S("instagramcaption", "instagram", "igcaption", "caption") is { Length: > 0 } ig ? ig : null,
+                tags,
+                S("primarykeyword", "keyword", "anahtarkelime") is { Length: > 0 } pk ? pk : null,
+                S("imagealttext", "imagealt", "alttext", "alt") is { Length: > 0 } alt2 ? alt2 : null);
         }
         catch { return new Fields(fallbackTitle, "", "", null, new List<string>(), null, null); }
     }
 
-    private sealed record Fields(
+    /// <summary>Nesne özelliklerini normalize anahtarla (alt çizgi/tire atılır; harf duyarsız) haritalar.</summary>
+    private static Dictionary<string, JsonElement> NormalizedMap(JsonElement r)
+    {
+        var map = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        if (r.ValueKind == JsonValueKind.Object)
+            foreach (var p in r.EnumerateObject())
+                map[p.Name.Replace("_", "").Replace("-", "")] = p.Value;
+        return map;
+    }
+
+    internal sealed record Fields(
         string Title, string ShortX, string BodyHtml, string? InstagramCaption,
         IReadOnlyList<string> Tags, string? PrimaryKeyword, string? ImageAltText);
 }

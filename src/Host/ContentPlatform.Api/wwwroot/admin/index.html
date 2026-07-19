@@ -142,6 +142,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
       <a href="#comments"><span class="ic">💬</span> Yorumlar</a>
       <a href="#usage"><span class="ic">$</span> Kullanım / Maliyet</a>
       <a href="#kill"><span class="ic">⛔</span> Acil Durdurma</a>
+      <a href="#ads"><span class="ic">📣</span> Reklamlar</a>
       <a href="#site"><span class="ic">🌐</span> Site / SEO</a>
       <a href="#settings"><span class="ic">⚙</span> Ayarlar</a>
       <a href="#" id="logout"><span class="ic">⎋</span> Çıkış</a>
@@ -186,8 +187,16 @@ $('#overlay').addEventListener('click',e=>{ if(e.target.id==='overlay') closeMod
 
 const statusChip = s => {
   const map={Published:'ok',Approved:'ok',ReadyToPublish:'ok',PendingReview:'warn',Draft:'warn',Failed:'dng',Rejected:'dng',Archived:'mut',Pending:'warn',Scheduled:'test',Skipped:'mut'};
-  return `<span class="chip ${map[s]||'mut'}">${h(s)}</span>`;
+  const tr={Published:'Yayınlandı',Approved:'Onaylı · sırada',ReadyToPublish:'Yayına hazır',PendingReview:'Onay bekliyor',Draft:'Taslak',Failed:'Hata',Rejected:'Reddedildi',Archived:'Arşiv',Pending:'Gönderiliyor',Scheduled:'Planlı',Skipped:'İptal',Discovered:'Keşfedildi'};
+  return `<span class="chip ${map[s]||'mut'}" title="${h(s)}">${h(tr[s]||s)}</span>`;
 };
+const mediaLabel = m => ({Pending:'Görsel sırada',Ready:'Görsel hazır',AwaitingManualUpload:'Görsel bekleniyor (elle)',Failed:'Görsel hatası',NotRequired:'—'}[m]||m);
+// "Kalan süre" — planlı yayınlar için insan-okur geri sayım
+function till(iso){ if(!iso) return ''; const ms=new Date(iso)-Date.now(); if(ms<=0) return 'şimdi';
+  const m=Math.round(ms/60000); if(m<60) return m+' dk sonra';
+  const h2=Math.floor(m/60); if(h2<24) return h2+' sa '+(m%60)+' dk sonra';
+  return Math.floor(h2/24)+' gün '+(h2%24)+' sa sonra'; }
+const fmtDT = iso => iso ? new Date(iso).toLocaleString('tr') : '—';
 const riskBadge = r => r==='High' ? '<span class="chip dng">Yüksek risk</span>' : (r==='Medium' ? '<span class="chip warn">Orta risk</span>' : '');
 const auditLabel = e => { const m={Created:'Oluşturuldu',Approved:'Onaylandı',Rejected:'Reddedildi',Edited:'Düzenlendi',Generated:'AI üretti',HeldForReview:'İncelemeye alındı',Retracted:'Geri çekildi',Published:'Yayınlandı'}; const c={Approved:'ok',Published:'ok',Rejected:'dng',HeldForReview:'warn',Retracted:'mut'}; return `<span class="chip ${c[e]||'mut'}">${m[e]||h(e)}</span>`; };
 
@@ -195,7 +204,7 @@ const auditLabel = e => { const m={Created:'Oluşturuldu',Approved:'Onaylandı',
 const routes = {
   dashboard:renderDashboard, queue:renderQueue, content:renderContent, add:renderAdd,
   categories:renderCategories, scheduled:renderScheduled, pending:renderPending, sources:renderSources, accounts:renderAccounts,
-  publications:renderPublications, comments:renderComments, usage:renderUsage, kill:renderKill, settings:renderSettings, site:renderSite
+  publications:renderPublications, comments:renderComments, usage:renderUsage, kill:renderKill, settings:renderSettings, site:renderSite, ads:renderAds
 };
 /* Kategori önbelleği + seçici */
 let _cats=null;
@@ -220,7 +229,7 @@ function dtLocal(iso){ if(!iso)return ''; const d=new Date(iso); const p=n=>Stri
 
 /* ---------------- Dashboard ---------------- */
 async function renderDashboard(){
-  const [queue, published, usage, sources, accounts, channels, pending, catList, kill] = await Promise.all([
+  const [queue, published, usage, sources, accounts, channels, pending, catList, kill, sched] = await Promise.all([
     api('/editorial?status=PendingReview&size=1').catch(()=>({total:0})),
     api('/editorial?status=Published&size=1').catch(()=>({total:0})),
     api('/publishing/usage?days=30').catch(()=>({totalUsd:0,totalTry:0,rows:[]})),
@@ -229,15 +238,18 @@ async function renderDashboard(){
     api('/publishing/channels').catch(()=>({available:[]})),
     api('/editorial/pending-image').catch(()=>[]),
     api('/categories').catch(()=>[]),
-    api('/killswitch').catch(()=>[])
+    api('/killswitch').catch(()=>[]),
+    api('/publishing/scheduled').catch(()=>[])
   ]);
   const activeSrc=sources.filter(s=>s.isActive).length;
   const activeAcc=accounts.filter(a=>a.status==='Active').length;
   const errAcc=accounts.filter(a=>a.status==='Error').length;
   const chips=(channels.available||[]).map(c=>`<span class="chip ok">${h(c)}</span>`).join(' ')||'<span class="chip mut">kayıtlı kanal yok</span>';
   const engaged=(kill||[]).filter(k=>k.engaged);
+  const next=(sched||[]).filter(p=>p.scheduledAt).sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt))[0];
+  const schedCard=(sched||[]).length?`<div class="card" style="border-color:rgba(158,110,255,.4)"><b>⏰ ${sched.length} planlı yayın</b> — sıradaki: ${fmtDT(next.scheduledAt)} (${till(next.scheduledAt)})${next.title?` · <span class="muted">${h(next.title)}</span>`:''} <a href="#scheduled">Yönet</a></div>`:'';
   const killBanner=engaged.length?`<div class="card" style="border-color:var(--danger);background:rgba(239,91,107,.08)"><b style="color:var(--danger)">⛔ Acil durdurma etkin (${engaged.length})</b> — ${engaged.map(k=>h(k.scope+(k.key?(':'+k.key):''))).join(', ')}. <a href="#kill">Yönet</a></div>`:'';
-  $('#view').innerHTML = head('Panel','Genel durum ve son 30 gün maliyeti') + killBanner + `
+  $('#view').innerHTML = head('Panel','Genel durum ve son 30 gün maliyeti') + killBanner + schedCard + `
     <div class="grid k4">
       <div class="stat"><div class="v">${queue.total??0}</div><div class="l">Onay bekleyen</div></div>
       <div class="stat"><div class="v">${published.total??0}</div><div class="l">Yayınlanan içerik</div></div>
@@ -284,7 +296,11 @@ async function renderQueue(){
     if(e.target.classList.contains('q-ok')){
       const img=tr.querySelector('.q-img').value, test=tr.querySelector('.q-test').checked;
       const w=tr.querySelector('.q-when').value; const scheduledAt=w?new Date(w).toISOString():null;
-      try{ await api(`/editorial/${id}/approve`,{method:'POST',body:{imageSource:img,testMode:test,scheduledAt}}); toast('Onaylandı, üretim sıraya alındı'); route(); }catch(e){toast(e.message,true);}
+      try{ const r=await api(`/editorial/${id}/approve`,{method:'POST',body:{imageSource:img,testMode:test,scheduledAt}});
+        if(r&&r.published===true) toast('Onaylandı ve yayına gönderildi');
+        else if(r&&r.published===false) toast('Onaylandı ama yayın gönderilemedi: '+(r.note||'bilinmeyen hata'),true);
+        else toast('Onaylandı — üretim sıraya alındı (~1 dk içinde işlenir)');
+        route(); }catch(e){toast(e.message,true);}
     }
     if(e.target.classList.contains('q-no')){ try{ await api(`/editorial/${id}/reject`,{method:'POST'}); toast('Reddedildi'); route(); }catch(e){toast(e.message,true);} }
     if(e.target.classList.contains('q-prev')){ e.preventDefault(); showDetail(id); }
@@ -298,30 +314,60 @@ async function renderQueue(){
 
 /* ---------------- İçerikler ---------------- */
 async function renderContent(){
-  const statuses=['','PendingReview','Draft','Approved','Published','Failed','Archived','Rejected'];
-  const sel = statuses.map(s=>`<option value="${s}">${s||'Tümü'}</option>`).join('');
-  $('#view').innerHTML = head('İçerikler','Başlıkta ara, duruma göre filtrele; satıra tıkla → düzenle / önizle / yayınlar',
-    `<div class="row"><input id="cq" type="text" placeholder="Başlıkta ara…" style="width:220px"><select id="fstatus" style="width:160px">${sel}</select></div>`);
+  // 3 sekme: her biri SUNUCU TARAFI sayfalı (durum + arama + sayfa parametreleriyle /editorial).
+  const TABS=[['Published','Yayınlananlar'],['Approved','Onaylı (işlemde)'],['PendingReview','Onaya gidenler'],['Draft','Taslak']];
+  const S=VIEW_STATE.content||(VIEW_STATE.content={page:1,q:'',status:'Published'});
+  if(!TABS.some(t=>t[0]===S.status)) S.status='Published';
+  const tabsHtml=`<div class="row" id="ctabs" style="gap:6px">${TABS.map(t=>`<button class="btn sm${S.status===t[0]?' pri':''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>`
+    + `<div class="row" style="margin-top:8px"><input id="cq" type="text" placeholder="Başlıkta ara…" style="width:220px"></div>`;
+  $('#view').innerHTML = head('İçerikler','Sekmeye göre listelenir; başlıkta ara, satıra tıkla → düzenle / önizle / yayınla', tabsHtml);
   const box=document.createElement('div'); box.className='card'; box.id='clist'; $('#view').appendChild(box);
-  const S=VIEW_STATE.content||(VIEW_STATE.content={page:1,q:'',status:''});
-  $('#fstatus').value=S.status; $('#cq').value=S.q;
+  $('#cq').value=S.q;
   const SIZE=25; let page=S.page;
   async function load(){
-    const st=$('#fstatus').value, q=$('#cq').value.trim();
-    S.page=page; S.status=st; S.q=q;
-    const r=await api(`/editorial?size=${SIZE}&page=${page}${st?`&status=${st}`:''}${q?`&q=${encodeURIComponent(q)}`:''}`);
-    box.innerHTML = `<table><thead><tr><th>Başlık</th><th style="width:120px">Durum</th><th style="width:90px">Risk</th><th style="width:110px">Medya</th><th style="width:70px">Mod</th><th style="width:150px">Tarih</th></tr></thead><tbody>${
-      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td><td>${statusChip(i.editorialStatus)}</td><td>${riskBadge(i.riskLevel)}</td><td class="muted">${h(i.mediaStatus)}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||'<tr><td colspan=6 class="empty">Kayıt yok.</td></tr>'
+    const st=S.status, q=$('#cq').value.trim();
+    S.page=page; S.q=q;
+    const [r, sched]=await Promise.all([
+      api(`/editorial?size=${SIZE}&page=${page}&status=${st}${st==='Draft'?'&asc=true':''}${q?`&q=${encodeURIComponent(q)}`:''}`),
+      api('/publishing/scheduled').catch(()=>[])
+    ]);
+    // içerik → en yakın planlı yayın zamanı (panelde "ne zaman yayınlanacak?" hep görünsün)
+    const planMap={}; (sched||[]).forEach(p=>{ if(!p.scheduledAt) return;
+      if(!planMap[p.contentItemId]||new Date(p.scheduledAt)<new Date(planMap[p.contentItemId])) planMap[p.contentItemId]=p.scheduledAt; });
+    const planCell=i=>{ const t=planMap[i.id];
+      if(t) return `<span class="chip test" title="${fmtDT(t)}">⏰ ${till(t)}</span>`;
+      if(i.editorialStatus==='Approved'&&i.mediaStatus==='Pending') return '<span class="muted" style="font-size:11px">üretim sırasında</span>';
+      if(i.editorialStatus==='Approved'&&i.mediaStatus==='AwaitingManualUpload') return '<span class="muted" style="font-size:11px">görsel bekliyor</span>';
+      return ''; };
+    box.innerHTML = `<table><thead><tr><th>Başlık</th><th style="width:130px">Durum</th><th style="width:120px">Yayın planı</th><th style="width:90px">Risk</th><th style="width:130px">Medya</th><th style="width:70px">Mod</th><th style="width:150px">Tarih</th></tr></thead><tbody>${
+      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td><td>${statusChip(i.editorialStatus)}</td><td>${planCell(i)}</td><td>${riskBadge(i.riskLevel)}</td><td class="muted">${h(mediaLabel(i.mediaStatus))}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
     }</tbody></table>${pagerBar(r.total,r.page,r.size)}`;
-    box.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>showDetail(tr.dataset.id));
+    box.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>showDetail(tr.dataset.id).catch(e=>toast(e.message,true)));
   }
   const reload=()=>{ page=1; S.page=1; load(); };
-  $('#fstatus').onchange=reload;
+  $('#ctabs').addEventListener('click',e=>{ const b=e.target.closest('[data-tab]'); if(b){ S.status=b.dataset.tab; document.querySelectorAll('#ctabs [data-tab]').forEach(x=>x.classList.toggle('pri',x.dataset.tab===S.status)); reload(); } });
   $('#cq').oninput=debounce(reload,350);
   box.addEventListener('click',e=>{ const b=e.target.closest('[data-pg]'); if(b){ page=Math.max(1,+b.dataset.pg); load(); } });
   await load();
 }
 
+/* İçeriğin GERÇEK yayın planını tek satırda anlatır (elle zaman + kadans planı + üretim durumu). */
+function planBanner(d,pubs){
+  const parts=[];
+  const future=(pubs||[]).filter(p=>p.status==='Scheduled'&&p.scheduledAt).sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
+  if(future.length)
+    parts.push(`<span class="chip test">⏰ Yayın: ${fmtDT(future[0].scheduledAt)} (${till(future[0].scheduledAt)})${future.length>1?` +${future.length-1} hedef`:''}</span>`);
+  else if(d.editorialStatus==='Approved'&&d.mediaStatus==='Pending')
+    parts.push('<span class="chip warn">Üretim sırasında — görsel/metin hazırlanınca kadansa göre yayınlanır (~1 dk döngü)</span>');
+  else if(d.editorialStatus==='Approved'&&d.mediaStatus==='AwaitingManualUpload')
+    parts.push('<span class="chip warn">Görsel bekleniyor — sen yükleyince yayına girer</span>');
+  else if(d.editorialStatus==='Approved'&&d.mediaStatus==='Ready'&&!(pubs||[]).length)
+    parts.push('<span class="chip dng">Yayın tetiklenmemiş görünüyor — aşağıdan "Yayınla" ile gönderebilirsin</span>');
+  else if(d.editorialStatus==='Published'&&d.publishedAt)
+    parts.push(`<span class="chip ok">Yayınlandı: ${fmtDT(d.publishedAt)}</span>`);
+  if(d.scheduledAt&&d.editorialStatus!=='Published') parts.push(`<span class="chip mut">elle istenen zaman: ${fmtDT(d.scheduledAt)}</span>`);
+  return parts.length?`<div class="row" style="margin-bottom:10px">${parts.join(' ')}</div>`:'';
+}
 async function showDetail(id){
   const d=await api(`/editorial/${id}`);
   const pubsResp=await api(`/publishing/publications?contentItemId=${id}`).catch(()=>({items:[]}));
@@ -332,7 +378,8 @@ async function showDetail(id){
   openModal(`
     <span class="x" onclick="closeModal()">×</span>
     <h2>${h(d.title||'(başlıksız)')}</h2>
-    <div class="muted" style="margin-bottom:10px">${statusChip(d.editorialStatus)} ${riskBadge(d.riskLevel)} · medya: ${h(d.mediaStatus)} · görsel: ${h(d.imageSource)} · kategori: ${h(catName(cl,d.categoryId))}${d.scheduledAt?` · planlı: ${new Date(d.scheduledAt).toLocaleString('tr')}`:''} ${d.testMode?'· <span class=\"chip test\">TEST</span>':''}</div>
+    <div class="muted" style="margin-bottom:10px">${statusChip(d.editorialStatus)} ${riskBadge(d.riskLevel)} · ${h(mediaLabel(d.mediaStatus))} · görsel: ${h(d.imageSource)} · kategori: ${h(catName(cl,d.categoryId))} ${d.testMode?'· <span class=\"chip test\">TEST</span>':''}</div>
+    ${planBanner(d,pubs)}
     ${d.holdReason?`<div class="chip dng" style="display:block;margin-bottom:10px">İncelemeye alındı — ${h(d.holdReason)}</div>`:''}
     <div class="tabs"><button class="active" data-t="edit">Düzenle</button><button data-t="prev">Önizleme</button><button data-t="pub">Yayınlar (${pubs.length})</button><button data-t="audit">Zaman çizelgesi (${auditLog.length})</button></div>
     <div id="tab-edit">
@@ -355,18 +402,22 @@ async function showDetail(id){
               <option value="Ai">AI görsel</option>
               <option value="Manual">Ben yükleyeceğim</option>
             </select>
+            <select id="e-cardstyle" style="width:auto" title="SkiaCard şablonu"><option value="">Rastgele</option>${Array.from({length:24},(_,i)=>`<option value="${i}">Şablon ${i+1} ${i<=12?'(Koyu)':'(Açık)'}</option>`).join('')}</select>
             <button class="btn pri sm" id="e-imggen">Görseli üret</button>
+            <select id="e-vidstyle" style="width:auto" title="Video şablonu (hepsi koyu; renk/dekor değişir)"><option value="">🎬 Rastgele şablon</option>${['Turuncu','Kızıl','Altın','Zümrüt','Turkuaz','Okyanus','İndigo','Mor','Magenta','Pembe','Lime','Buz','Bakır','Çelik','Gece Moru','Neon Yeşil','Cyan','Amber','Bordo','Petrol'].map((n,i)=>`<option value="${i}">${i+1}. ${n}</option>`).join('')}</select>
+            <button class="btn sm" id="e-vidgen" title="Reels/Shorts/TikTok için 1080×1920 dikey; sayfa sayısı metne göre (7 sn/sayfa)">🎬 Video oluştur</button>
           </div>
         </div>
         <div id="e-imgupload" class="row" style="display:none;margin-top:8px"><input type="file" id="e-imgfile" accept="image/*"><button class="btn sm" id="e-imgup">Yükle</button></div>
         <div id="e-imgprev" style="margin-top:10px">${d.mediaUrl?`<img src="${h(d.mediaUrl)}" alt="görsel" style="max-width:340px;border-radius:8px;display:block">`:'<span class="muted">Henüz görsel yok.</span>'}</div>
+        <div id="e-vidprev" style="margin-top:10px">${d.videoUrl?`<video src="${h(d.videoUrl)}" controls playsinline style="max-height:360px;border-radius:10px;display:block"></video><div class="muted" style="font-size:11px;margin-top:4px">🎬 Reels/Shorts videosu hazır (1080×1920 · 21 sn). IG/YouTube/TikTok paylaşımında video varsa VİDEO, yoksa görsel gönderilir.</div>`:''}</div>
         <div class="muted" style="font-size:11px;margin-top:6px">Görsel burada anlık üretilir/önizlenir (yayınlamaz). SkiaCard ücretsiz, AI görsel ücretlidir.</div>
       </div>
       <div class="row" style="margin-top:14px">
         <button class="btn pri" id="e-save">Kaydet (yeni revizyon)</button>
         ${d.editorialStatus==='Draft'?'<button class="btn pri" id="e-submit" title="İçerik hazırsa onay kuyruğuna gönder">✓ Onaya gönder</button>':''}
         ${d.mediaStatus==='Ready'&&d.editorialStatus!=='Published'?'<button class="btn" id="e-publish">Yayınla</button>':''}
-        <label class="row" style="margin:0"><input type="checkbox" id="e-test" ${d.testMode?'checked':''} style="width:auto"> Test modu</label>
+        ${d.mediaStatus==='Ready'?'<button class="btn sm" id="e-sendtest" title="Test kanalına HEMEN gönderir; asıl yayın planını DEĞİŞTİRMEZ">🧪 Test\'e gönder</button>':''}
         <label class="row" style="margin:0"><input type="checkbox" id="e-adgate" style="width:auto"> Reklam izlet (Adsgram)</label>
         <button class="btn dng right" id="e-retract">Geri çek</button>
       </div>
@@ -381,8 +432,8 @@ async function showDetail(id){
       <div class="preview">${h(d.instagramCaption||'—')}</div>
     </div>
     <div id="tab-pub" style="display:none">
-      <table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th>Deneme</th><th></th></tr></thead><tbody>${
-        pubs.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=5 class="empty">Henüz yayın yok.</td></tr>'
+      <table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th style="width:190px">Zaman</th><th>Deneme</th><th></th></tr></thead><tbody>${
+        pubs.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td class="muted">${p.status==='Scheduled'?`⏰ ${fmtDT(p.scheduledAt)}<div style="font-size:11px">${till(p.scheduledAt)}</div>`:(p.publishedAt?fmtDT(p.publishedAt):fmtDT(p.createdAt))}</td><td>${p.attempts}</td><td>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=6 class="empty">Henüz yayın yok. Onaylandıysa üretim tamamlanınca burada belirir.</td></tr>'
       }</tbody></table>
     </div>
     <div id="tab-audit" style="display:none">
@@ -414,24 +465,39 @@ async function showDetail(id){
     try{ await api(`/editorial/${id}/revision`,{method:'PUT',body}); toast('Kaydedildi'); closeModal(); route(); }catch(e){toast(e.message,true);}
   };
   const subBtn=$('#e-submit'); if(subBtn) subBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/submit-review`,{method:'POST'}); toast('Onaya gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
-  const pubBtn=$('#e-publish'); if(pubBtn) pubBtn.onclick=async()=>{ try{ await api(`/editorial/${id}/publish?adGate=${($('#e-adgate')&&$('#e-adgate').checked)?'true':'false'}`,{method:'POST'}); toast('Yayına gönderildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
-  $('#e-test').onchange=async(ev)=>{ try{ await api(`/editorial/${id}/testmode`,{method:'POST',body:{enabled:ev.target.checked}}); toast('Test modu güncellendi'); }catch(e){toast(e.message,true);} };
+  const pubBtn=$('#e-publish'); if(pubBtn) pubBtn.onclick=async()=>{
+    if(pubBtn.disabled) return; pubBtn.disabled=true; pubBtn.textContent='⏳ Yayınlanıyor…'; // çifte tıklama koruması
+    try{ await api(`/editorial/${id}/publish?adGate=${($('#e-adgate')&&$('#e-adgate').checked)?'true':'false'}`,{method:'POST'}); toast('Yayına gönderildi — kadanslıysa plana alınır, değilse hemen gider'); closeModal(); route(); }
+    catch(e){ toast(e.message,true); pubBtn.disabled=false; pubBtn.textContent='Yayınla'; } };
+  const stBtn=$('#e-sendtest'); if(stBtn) stBtn.onclick=async()=>{ stBtn.disabled=true; stBtn.textContent='Gönderiliyor…';
+    try{ await api(`/editorial/${id}/send-test`,{method:'POST'}); toast('Test kanalına gönderildi — asıl yayın planı değişmedi'); stBtn.textContent='🧪 Test\'e gönder'; stBtn.disabled=false; }
+    catch(e){ toast(e.message,true); stBtn.textContent='🧪 Test\'e gönder'; stBtn.disabled=false; } };
   $('#e-retract').onclick=async()=>{ if(!confirm('Geri çekilsin mi?'))return; try{ await api(`/editorial/${id}/retract`,{method:'POST'}); toast('Geri çekildi'); closeModal(); route(); }catch(e){toast(e.message,true);} };
   // 🖼️ Görsel: kaynak seç + anlık üret/yükle + önizleme (yayınlamaz)
   const imgSrc=$('#e-imgsrc');
   if(imgSrc){
     imgSrc.value=d.imageSource||'SkiaCard';
-    const syncImg=()=>{ const man=imgSrc.value==='Manual'; $('#e-imgupload').style.display=man?'flex':'none'; $('#e-imggen').style.display=man?'none':'inline-block'; };
+    const syncImg=()=>{ const v=imgSrc.value; const man=v==='Manual'; $('#e-imgupload').style.display=man?'flex':'none'; $('#e-imggen').style.display=man?'none':'inline-block'; const cs=$('#e-cardstyle'); if(cs) cs.style.display=(v==='SkiaCard')?'inline-block':'none'; };
     imgSrc.onchange=syncImg; syncImg();
+    $('#e-vidgen').onclick=async()=>{ const b=$('#e-vidgen'); b.disabled=true; b.textContent='🎬 Üretiliyor… (~15 sn)';
+      const vs=$('#e-vidstyle'); const style=(vs&&vs.value!=='')?parseInt(vs.value,10):null;
+      try{ const r=await api(`/editorial/${id}/preview-video`,{method:'POST',body:{style}});
+        $('#e-vidprev').innerHTML=`<video src="${h(r.url)}" controls playsinline style="max-height:360px;border-radius:10px;display:block"></video><div class="muted" style="font-size:11px;margin-top:4px">🎬 Reels/Shorts videosu hazır (1080×1920 · 21 sn). IG/YouTube/TikTok paylaşımında video varsa VİDEO, yoksa görsel gönderilir.</div>`;
+        toast('Video üretildi — önizlemeden izleyebilirsin'); b.disabled=false; b.textContent='🎬 Video oluştur'; }
+      catch(e){ toast(e.message,true); b.disabled=false; b.textContent='🎬 Video oluştur'; } };
     $('#e-imggen').onclick=async()=>{ const b=$('#e-imggen'); b.disabled=true; b.textContent='Üretiliyor…';
-      try{ await api(`/editorial/${id}/preview-image`,{method:'POST',body:{imageSource:imgSrc.value}}); toast('Görsel üretildi'); showDetail(id); }
+      const cs=$('#e-cardstyle'); const cardStyle=(imgSrc.value==='SkiaCard'&&cs&&cs.value!=='')?parseInt(cs.value,10):null;
+      try{ await api(`/editorial/${id}/preview-image`,{method:'POST',body:{imageSource:imgSrc.value,cardStyle}}); toast('Görsel üretildi'); showDetail(id); }
       catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Görseli üret'; } };
     $('#e-imgup').onclick=async()=>{ const f=$('#e-imgfile').files[0]; if(!f)return toast('Önce dosya seç',true);
       const fd=new FormData(); fd.append('file',f);
       try{ await api(`/editorial/${id}/preview-image/upload`,{method:'POST',body:fd}); toast('Görsel yüklendi'); showDetail(id); }catch(e){toast(e.message,true);} };
   }
 }
-async function retryPub(id){ try{ const r=await api(`/publishing/publications/${id}/retry`,{method:'POST'}); toast(r.published?'Yayınlandı':'Tekrar denendi'); }catch(e){toast(e.message,true);} }
+async function retryPub(id,btn){ const b=btn||(window.event&&window.event.target);
+  if(b&&b.disabled) return; if(b){ b.disabled=true; b.dataset.old=b.textContent; b.textContent='⏳…'; }
+  try{ const r=await api(`/publishing/publications/${id}/retry`,{method:'POST'}); toast(r.published?'Yayınlandı':'Tekrar denendi'); route(); }
+  catch(e){ toast(e.message,true); if(b){ b.disabled=false; b.textContent=b.dataset.old||'Yeniden dene'; } } }
 
 /* ---------------- İçerik Ekle ---------------- */
 async function renderAdd(){
@@ -560,15 +626,20 @@ function cadenceText(c){
 async function renderScheduled(){
   const list=await api('/publishing/scheduled');
   $('#view').innerHTML=head('Planlanmış Yayınlar','Zamanı gelince otomatik gönderilecek yayınlar — yeniden planla, hemen gönder veya iptal et')+
-    `<div class="card"><table><thead><tr><th style="width:190px">Planlı zaman</th><th>Kanal</th><th>Hedef</th><th>İçerik</th><th style="width:260px"></th></tr></thead><tbody>${
-      list.map(p=>`<tr data-id="${p.id}"><td>${p.scheduledAt?new Date(p.scheduledAt).toLocaleString('tr'):'—'}</td><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td>
-        <td><button class="btn sm" onclick="showDetail('${p.contentItemId}')">Aç</button></td>
-        <td class="row"><button class="btn sm sc-when">Yeniden planla</button><button class="btn pri sm sc-now">Şimdi gönder</button><button class="btn dng sm sc-cancel">İptal</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Planlı yayın yok.</td></tr>'
+    `<div class="card"><table><thead><tr><th style="width:210px">Planlı zaman</th><th>İçerik</th><th style="width:90px">Kanal</th><th style="width:130px">Hedef</th><th style="width:260px"></th></tr></thead><tbody>${
+      list.sort((a,b)=>new Date(a.scheduledAt||0)-new Date(b.scheduledAt||0)).map(p=>`<tr data-id="${p.id}"><td>${fmtDT(p.scheduledAt)}<div class="muted" style="font-size:11px">${till(p.scheduledAt)}</div></td>
+        <td><a href="#" class="sc-open">${h(p.title||'(başlıksız içerik)')}</a></td><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td>
+        <td class="row"><button class="btn sm sc-when">Yeniden planla</button><button class="btn pri sm sc-now">Şimdi gönder</button><button class="btn dng sm sc-cancel">İptal</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Planlı yayın yok. (Kadanslı kategorilerde onaylanan içerikler üretim sonrası burada belirir.)</td></tr>'
     }</tbody></table></div>`;
   $('#view').addEventListener('click',async e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
-    if(e.target.classList.contains('sc-now')){ if(!confirm('Şimdi gönderilsin mi?'))return; try{ const r=await api(`/publishing/publications/${id}/publish-now`,{method:'POST'}); toast(r.published?'Gönderildi':'Denendi'); route(); }catch(e){toast(e.message,true);} }
+    if(e.target.classList.contains('sc-now')){ if(!confirm('Şimdi gönderilsin mi?'))return;
+      const b=e.target; if(b.disabled) return; // çifte tıklama = çifte yayın koruması
+      b.disabled=true; const old=b.textContent; b.textContent='⏳ Gönderiliyor…';
+      try{ const r=await api(`/publishing/publications/${id}/publish-now`,{method:'POST'}); toast(r.published?'Gönderildi':'Denendi'); route(); }
+      catch(e){ toast(e.message,true); b.disabled=false; b.textContent=old; } }
     if(e.target.classList.contains('sc-cancel')){ if(!confirm('Plan iptal edilsin mi?'))return; try{ await api(`/publishing/publications/${id}/cancel`,{method:'POST'}); toast('İptal edildi'); route(); }catch(e){toast(e.message,true);} }
     if(e.target.classList.contains('sc-when')){ rescheduleForm(id); }
+    if(e.target.classList.contains('sc-open')){ e.preventDefault(); const p=list.find(x=>x.id===id); if(p) showDetail(p.contentItemId).catch(er=>toast(er.message,true)); }
   });
 }
 function rescheduleForm(id){
@@ -642,15 +713,80 @@ function sourceForm(s,cl){
 }
 
 /* ---------------- Sosyal Hesaplar ---------------- */
-const CREDS={Telegram:['BotToken'],X:['ApiKey','ApiSecret','AccessToken','AccessTokenSecret'],Instagram:['IgUserId','PageId','LongLivedToken'],Threads:['ThreadsUserId','AccessToken']};
+const CREDS={Telegram:['BotToken'],X:['ApiKey','ApiSecret','AccessToken','AccessTokenSecret'],Instagram:['IgUserId','PageId','LongLivedToken'],Threads:['ThreadsUserId','AccessToken'],Youtube:['ClientId','ClientSecret','RefreshToken'],TikTok:['ClientKey','ClientSecret','RefreshToken']};
+// Platform başına anahtar rehberi (Hesap Ekle formunda gösterilir)
+const CRED_HINTS={Telegram:'BotFather → /newbot → token. Bot kanala/gruba YÖNETİCİ eklenmeli.',X:'ELLE GİRME — "Tek Tık Hesap Bağlantısı" kartından 𝕏 Hesap bağla kullan (OAuth2).',Instagram:'Meta developers → Instagram Graph API → uzun ömürlü token + IG User ID + Page ID.',Threads:'Meta developers → Threads API → kullanıcı ID + access token.',Youtube:'Google Cloud Console → OAuth istemcisi (YouTube Data API v3) → ClientId/Secret + RefreshToken. Video yükleme özelliği yakında.',TikTok:'TikTok for Developers → app → ClientKey/Secret + RefreshToken. Video yükleme özelliği yakında.'};
 async function renderAccounts(){
   const list=await api('/social-accounts');
-  $('#view').innerHTML=head('Sosyal Hesaplar','Tüm API anahtarları/token buradan girilir (şifreli saklanır)',
+  $('#view').innerHTML=head('Sosyal Hesaplar','Tüm API anahtarları/token buradan girilir (şifreli saklanır). Hedefe kategori bağla → o kategorinin içerikleri oraya gider.',
     `<button class="btn pri" id="acc-new">Hesap Ekle</button>`)+
+    `<div class="card" style="background:var(--panel2)"><b>📡 Gönderim durumu</b><div class="muted" style="font-size:12.5px;margin-top:4px">
+      <span class="chip ok">Telegram: AKTİF</span> · <span class="chip ok">X: AKTİF</span> (metin + görsel + video; OAuth ile bağla) · <span class="chip ok">Instagram: AKTİF</span> (foto + Reels) · <span class="chip ok">Threads: AKTİF</span> (metin + foto + video) · <span class="chip ok">YouTube: AKTİF</span> (Shorts — yalnız videolu içerik) · <span class="chip ok">TikTok: AKTİF</span> (yalnız videolu içerik; denetim onayına dek "yalnız ben" kalabilir).</div></div>`+
     `<div class="card"><table><thead><tr><th>Ad</th><th>Platform</th><th>Durum</th><th>Token bitiş</th><th style="width:130px"></th></tr></thead><tbody>${
       list.map(a=>`<tr data-id="${a.id}"><td>${h(a.displayName)}</td><td>${h(a.platform)}</td><td>${a.status==='Active'?'<span class=\"chip ok\">Aktif</span>':(a.status==='Error'?'<span class=\"chip dng\">Hata</span>':'<span class=\"chip mut\">Kapalı</span>')}</td>
         <td class="muted">${a.tokenExpiresAt?new Date(a.tokenExpiresAt).toLocaleDateString('tr'):'—'}</td><td><button class="btn sm a-det">Hedefler</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hesap yok.</td></tr>'
     }</tbody></table></div>`;
+  // Medya önceliği kartı (platform başına görsel/video)
+  const PREF_PLATFORMS=[['telegram','Telegram'],['x','X (Twitter)'],['instagram','Instagram'],['threads','Threads'],['youtube','YouTube'],['tiktok','TikTok']];
+  const PREF_DEFAULTS={telegram:'image',x:'image',instagram:'video',threads:'image',youtube:'video',tiktok:'video'};
+  try{
+    const st=await api('/settings'); const sv={}; (st||[]).forEach(x=>sv[x.key]=x.maskedValue);
+    const rows=PREF_PLATFORMS.map(p=>{const cur=(sv['media.pref.'+p[0]]||PREF_DEFAULTS[p[0]]);
+      return `<div class="row" style="margin-bottom:8px"><div class="s-lbl muted">${p[1]}</div><select data-pref="${p[0]}" style="width:220px"><option value="image" ${cur!=='video'?'selected':''}>🖼️ Görsel öncelikli (yoksa video)</option><option value="video" ${cur==='video'?'selected':''}>🎬 Video öncelikli (yoksa görsel)</option></select></div>`;}).join('')
+      +`<div class="row" style="margin-bottom:8px"><div class="s-lbl muted">📖 IG Hikaye</div><select id="ig-story" style="width:220px"><option value="true" ${sv['instagram.story_enabled']!=='false'?'selected':''}>Açık — her gönderimde hikaye de paylaş</option><option value="false" ${sv['instagram.story_enabled']==='false'?'selected':''}>Kapalı — hikaye atma</option></select></div>`;
+    const card=document.createElement('div'); card.className='card';
+    card.innerHTML=`<h3 style="margin-top:0">📎 Medya önceliği (platform başına)</h3><div class="muted" style="font-size:12.5px;margin-bottom:10px">Yayında öncelikli medya türü gönderilir; o üretilmemişse otomatik ötekine düşer.</div>${rows}<button class="btn pri" id="pref-save" style="margin-top:6px">Öncelikleri kaydet</button>
+      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+      <b>🎵 Video arka plan müziği</b>
+      <div class="muted" style="font-size:12px;margin:4px 0 8px">Slayt videolarına gömülür (21 sn'e kesilir, sonda yumuşak kapanır). <b>TELİFSİZ</b> müzik kullan — telifli şarkı YouTube/Instagram'da videoyu susturabilir. Kaynak: YouTube Audio Library, Pixabay Music.</div>
+      <div class="row" id="music-cur" style="margin-bottom:8px">${sv['video.music_url']?`<audio src="${h(sv['video.music_url'])}" controls style="height:34px"></audio><button class="btn dng sm" id="music-del">Kaldır</button>`:'<span class="muted">Müzik yüklenmedi — videolar sessiz üretilir.</span>'}</div>
+      <div class="row"><input type="file" id="music-file" accept="audio/mpeg,.mp3"><button class="btn sm" id="music-up">Yükle</button></div>`;
+    $('#view').appendChild(card);
+    $('#pref-save').onclick=async()=>{ try{ for(const el of card.querySelectorAll('[data-pref]')) await api('/settings',{method:'PUT',body:{key:'media.pref.'+el.getAttribute('data-pref'),value:el.value,isSecret:false}});
+      const igs=$('#ig-story'); if(igs) await api('/settings',{method:'PUT',body:{key:'instagram.story_enabled',value:igs.value,isSecret:false}});
+      toast('Medya öncelikleri kaydedildi'); }catch(e){toast(e.message,true);} };
+    $('#music-up').onclick=async()=>{ const f=$('#music-file').files[0]; if(!f)return toast('Önce mp3 seç',true);
+      const fd=new FormData(); fd.append('file',f);
+      try{ const r=await api('/editorial/video-music',{method:'POST',body:fd});
+        await api('/settings',{method:'PUT',body:{key:'video.music_url',value:r.url,isSecret:false}});
+        toast('Müzik yüklendi — yeni videolara gömülecek'); route(); }catch(e){toast(e.message,true);} };
+    const md=$('#music-del'); if(md) md.onclick=async()=>{ try{ await api('/settings',{method:'PUT',body:{key:'video.music_url',value:'',isSecret:false}}); toast('Müzik kaldırıldı — videolar sessiz üretilir'); route(); }catch(e){toast(e.message,true);} };
+
+    // ---- Tek tık bağlantı kartı (Instagram + Threads + YouTube + TikTok) ----
+    const OAUTH_BLOCKS=[
+      {p:'x',label:'X (Twitter)',icon:'𝕏',idKey:'x.client_id',secKey:'x.client_secret',idLbl:'Client ID',secLbl:'Client Secret',hint:'developer.x.com → App → User authentication (OAuth 2.0)'},
+      {p:'instagram',label:'Instagram',icon:'📸',idKey:'meta.instagram.app_id',secKey:'meta.instagram.app_secret',idLbl:'App ID',secLbl:'App Secret',hint:'Meta panosu → Instagram use case'},
+      {p:'threads',label:'Threads',icon:'🧵',idKey:'meta.threads.app_id',secKey:'meta.threads.app_secret',idLbl:'App ID',secLbl:'App Secret',hint:'Meta panosu → Threads use case → Settings'},
+      {p:'youtube',label:'YouTube',icon:'▶️',idKey:'google.client_id',secKey:'google.client_secret',idLbl:'Client ID',secLbl:'Client Secret',hint:'Google Cloud Console → OAuth istemcisi (Web)'},
+      {p:'tiktok',label:'TikTok',icon:'🎵',idKey:'tiktok.client_key',secKey:'tiktok.client_secret',idLbl:'Client Key',secLbl:'Client Secret',hint:'TikTok for Developers → uygulama'}];
+    const oauthBlock=(b)=>{const idSet=!!sv[b.idKey];const secSet=!!sv[b.secKey];
+      return `<div style="flex:1;min-width:260px;border:1px solid var(--line);border-radius:10px;padding:12px 14px">
+        <b>${b.icon} ${b.label}</b><div class="muted" style="font-size:11px">${b.hint}</div>
+        <label style="margin-top:8px">${b.idLbl}</label><input type="text" id="${b.p}-oauth-id" value="${idSet?h(sv[b.idKey]):''}" placeholder="${b.idLbl}">
+        <label>${b.secLbl}</label><input type="password" id="${b.p}-oauth-sec" placeholder="${secSet?'kayıtlı ✓ (değiştirmek için yaz)':b.secLbl}">
+        <div class="row" style="margin-top:10px">
+          <button class="btn sm" id="${b.p}-oauth-save">Kaydet</button>
+          <button class="btn pri sm" id="${b.p}-oauth-connect" ${idSet&&secSet?'':'disabled title="Önce anahtarları kaydet"'}>${b.icon} Hesap bağla</button>
+        </div></div>`;};
+    const mc=document.createElement('div'); mc.className='card';
+    mc.innerHTML=`<h3 style="margin-top:0">🔗 Tek Tık Hesap Bağlantısı</h3>
+      <div class="muted" style="font-size:12.5px;margin-bottom:10px">Uygulama anahtarlarını <b>bir kez</b> kaydet → sonra her hesabı <b>Hesap bağla</b> ile ekle: açılan pencerede o hesapla giriş yapıp izin verirsin, hesap + yayın hedefi <b>otomatik</b> kurulur. Hesap başına ayrı API anahtarı YOK. Token'lar otomatik yenilenir (IG/Threads 60 gün, TikTok 24 saat, YouTube kalıcı).</div>
+      <div class="row" style="align-items:stretch;gap:12px;flex-wrap:wrap">${OAUTH_BLOCKS.map(oauthBlock).join('')}</div>`;
+    $('#view').appendChild(mc);
+    OAUTH_BLOCKS.forEach(b=>{
+      $('#'+b.p+'-oauth-save').onclick=async()=>{ try{
+        const id=$('#'+b.p+'-oauth-id').value.trim(), sec=$('#'+b.p+'-oauth-sec').value.trim();
+        if(id) await api('/settings',{method:'PUT',body:{key:b.idKey,value:id,isSecret:false}});
+        if(sec) await api('/settings',{method:'PUT',body:{key:b.secKey,value:sec,isSecret:true}});
+        if(!id&&!sec) return toast(b.idLbl+' ya da '+b.secLbl+' gir',true);
+        toast('Kaydedildi'); route(); }catch(e){toast(e.message,true);} };
+      $('#'+b.p+'-oauth-connect').onclick=async()=>{ try{
+        const r=await api('/platform/oauth/'+b.p+'/start-url');
+        window.open(r.url,'oauth-connect','width=540,height=800'); }catch(e){toast(e.message,true);} };
+    });
+    if(!window.__metaMsgHooked){ window.__metaMsgHooked=true;
+      window.addEventListener('message',e=>{ if(e.data==='meta-connected'){ toast('Hesap bağlandı ✓'); if(location.hash==='#accounts') route(); } }); }
+  }catch(e){}
   $('#acc-new').onclick=()=>accountForm();
   $('#view').addEventListener('click',e=>{ const tr=e.target.closest('tr[data-id]'); if(tr&&e.target.classList.contains('a-det')) accountDetail(tr.dataset.id); });
 }
@@ -661,7 +797,7 @@ function accountForm(){
     <div id="ac-creds"></div>
     <label>Token bitiş (opsiyonel — IG/Threads)</label><input id="ac-exp" type="text" placeholder="2026-09-01">
     <button class="btn pri" style="margin-top:14px" id="ac-save">Kaydet (şifreli)</button>`);
-  const draw=()=>{ const p=$('#ac-p').value; $('#ac-creds').innerHTML=CREDS[p].map(k=>`<label>${k}</label><input type="password" class="cred" data-k="${k}">`).join(''); };
+  const draw=()=>{ const p=$('#ac-p').value; $('#ac-creds').innerHTML=`<div class="muted" style="font-size:12px;margin:6px 0">${CRED_HINTS[p]||''}</div>`+CREDS[p].map(k=>`<label>${k}</label><input type="password" class="cred" data-k="${k}">`).join(''); };
   $('#ac-p').onchange=draw; draw();
   $('#ac-save').onclick=async()=>{
     const creds={}; $('#modal').querySelectorAll('.cred').forEach(i=>creds[i.dataset.k]=i.value);
@@ -669,28 +805,71 @@ function accountForm(){
     try{ await api('/social-accounts',{method:'POST',body:{platform:$('#ac-p').value,displayName:$('#ac-name').value,credentials:creds,tokenExpiresAt:exp,siteId:null}}); toast('Hesap eklendi'); closeModal(); route(); }catch(e){toast(e.message,true);}
   };
 }
+let CUR_TARGETS=[], CUR_CATS=[];
 async function accountDetail(id){
   const d=await api(`/social-accounts/${id}`);
   const cl=await cats();
+  CUR_TARGETS=d.targets||[]; CUR_CATS=cl;
   openModal(`<span class="x" onclick="closeModal()">×</span><h2>${h(d.displayName)} — ${h(d.platform)}</h2>
     ${d.lastError?`<div class="chip dng">${h(d.lastError)}</div>`:''}
+    ${d.platform==='Telegram'?`<div class="card" style="background:var(--panel2);margin:10px 0"><b>💬 Gönderilerde yorum bölümü</b><div class="muted" style="font-size:12px;margin-top:4px">
+      Haber ayrıntısı linki artık gönderi <b>metni içinde</b> veriliyor (altta inline buton YOK). Böylece kanal gönderisinin altındaki <b>yorum/tartışma</b> bölümü açılabiliyor.
+      Yorumların çıkması için kanala bir <b>tartışma grubu</b> bağlı olmalı (Telegram → Kanal → Ayarlar → Tartışma → grup seç/oluştur); bağlandıktan sonra her gönderide yorumlar OTOMATİK açılır.
+      Eski inline buton davranışına dönmek istersen sunucuda <code>Telegram:DetailLinkInCaption=false</code> yap.</div></div>`:''}
     <h3>Hedefler (grup/kanal/profil)</h3>
-    <table><thead><tr><th>Başlık</th><th>Rol</th><th>Kategori</th><th>Dış ID</th><th></th></tr></thead><tbody>${
-      d.targets.map(t=>`<tr><td>${h(t.title)}</td><td><span class="chip ${t.role==='AdminInbox'?'test':'mut'}">${h(t.role)}</span></td><td>${t.categoryId?`<span class="muted">${h(catName(cl,t.categoryId))}</span>`:'<span class="chip ok">Tüm kategoriler</span>'}</td><td class="muted">${h(t.externalTargetId)}</td><td><button class="btn dng sm" onclick="disableTarget('${t.id}')">Kapat</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hedef yok.</td></tr>'
+    <table><thead><tr><th>Başlık</th><th>Rol</th><th>Kategori</th><th>Dış ID</th><th>Durum</th><th></th></tr></thead><tbody>${
+      d.targets.map((t,i)=>`<tr><td>${h(t.title)}${t.showOnHome?' <span class="chip ok" title="Ana sayfada yayınlanıyor">🏠 Ana sayfa</span>':''}</td><td><span class="chip ${t.role==='AdminInbox'?'test':t.role==='Test'?'warn':'mut'}">${h(t.role)}</span></td><td>${t.categoryId?`<span class="muted">${h(catName(cl,t.categoryId))}</span>`:'<span class="chip ok">Tüm kategoriler</span>'}</td><td class="muted">${h(t.externalTargetId)}</td><td>${t.isActive?'<span class="chip ok">Aktif</span>':'<span class="chip mut">Kapalı</span>'}</td><td class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="targetForm('${id}',${i})">Düzenle</button><button class="btn sm" onclick="toggleTarget('${t.id}',${t.isActive?'false':'true'},'${id}')">${t.isActive?'Kapat':'Aç'}</button><button class="btn dng sm" onclick="deleteTarget('${t.id}','${id}')">Sil</button></td></tr>`).join('')||'<tr><td colspan=6 class="empty">Hedef yok.</td></tr>'
     }</tbody></table>
-    <h3>Hedef ekle</h3>
-    <div class="grid k2">
-      <div><label>Dış ID (chat/kanal id)</label><input id="t-ext" type="text" placeholder="-100…"></div>
-      <div><label>Başlık</label><input id="t-title" type="text"></div>
-      <div><label>Tür</label><select id="t-type"><option>Channel</option><option>Group</option><option>Profile</option><option>Feed</option></select></div>
-      <div><label>Rol</label><select id="t-role"><option value="Editorial">Editorial (normal yayın)</option><option value="Test">Test (deneme)</option><option value="AdminInbox">AdminInbox (girdi — yayın almaz)</option></select></div>
-      <div><label>Bu hedef hangi kategorinin içeriğini yayınlasın?</label><select id="t-cat"><option value="">Tüm kategoriler (ortak kanal)</option>${cl.map(c=>`<option value="${c.id}">${h(c.name)}</option>`).join('')}</select><div class="muted" style="font-size:11px;margin-top:4px">Örn: her kategoriye ayrı Instagram → o kategoriyi seç · tüm kategoriler için ortak Twitter → "Tüm kategoriler"</div></div>
-    </div>
-    <div class="row" style="margin-top:12px"><button class="btn pri" id="t-add">Hedef ekle</button><button class="btn dng right" onclick="disableAccount('${id}')">Hesabı kapat</button></div>`);
-  $('#t-add').onclick=async()=>{ try{ await api(`/social-accounts/${id}/targets`,{method:'POST',body:{externalTargetId:$('#t-ext').value,type:$('#t-type').value,role:$('#t-role').value,categoryId:$('#t-cat').value||null,title:$('#t-title').value,language:null,timeZone:null,characterLimit:null}}); toast('Hedef eklendi'); accountDetail(id); }catch(e){toast(e.message,true);} };
+    <div class="row" style="margin-top:14px"><button class="btn pri" onclick="targetForm('${id}',null)">+ Hedef ekle</button><button class="btn right" onclick="disableAccount('${id}')">Hesabı kapat</button><button class="btn dng" onclick="deleteAccount('${id}')">Hesabı sil</button></div>`);
 }
+// Hedef ekle/düzenle ortak formu. idx null → yeni ekleme; sayı → CUR_TARGETS[idx] düzenleme.
+function targetForm(accountId, idx){
+  const cl=CUR_CATS||[];
+  const t=(idx===null||idx===undefined)?null:CUR_TARGETS[idx];
+  const edit=!!t;
+  const tsel=edit?t.type:'Channel';
+  const rsel=edit?t.role:'Editorial';
+  const types=['Channel','Group','Profile','Feed'].map(x=>`<option value="${x}" ${tsel===x?'selected':''}>${x}</option>`).join('');
+  const roles=[['Editorial','Editorial (normal yayın)'],['Test','Test (deneme)'],['AdminInbox','AdminInbox (girdi — yayın almaz)']]
+    .map(r=>`<option value="${r[0]}" ${rsel===r[0]?'selected':''}>${r[1]}</option>`).join('');
+  openModal(`<span class="x" onclick="accountDetail('${accountId}')">×</span><h2>${edit?'Hedefi düzenle':'Hedef ekle'}</h2>
+    <div class="grid k2">
+      <div><label>Dış ID (chat/kanal id)</label><input id="t-ext" type="text" placeholder="-100…" value="${edit?h(t.externalTargetId):''}"></div>
+      <div><label>Başlık</label><input id="t-title" type="text" value="${edit?h(t.title):''}"></div>
+      <div><label>Tür</label><select id="t-type">${types}</select></div>
+      <div><label>Rol</label><select id="t-role">${roles}</select></div>
+      <div><label>Bu hedef hangi kategorinin içeriğini yayınlasın?</label><select id="t-cat"><option value="">Tüm kategoriler (ortak kanal)</option>${cl.map(c=>`<option value="${c.id}" ${edit&&t.categoryId===c.id?'selected':''}>${h(c.name)}</option>`).join('')}</select><div class="muted" style="font-size:11px;margin-top:4px">Örn: her kategoriye ayrı Instagram → o kategoriyi seç · tüm kategoriler için ortak Twitter → "Tüm kategoriler"</div></div>
+      ${edit?`<div><label>Durum</label><label class="row" style="margin-top:9px"><input type="checkbox" id="t-active" ${t.isActive?'checked':''} style="width:auto"> Aktif</label></div>`:''}
+    </div>
+    <div class="card" style="background:var(--panel2);margin:12px 0"><b>🏠 Ana sayfada göster</b>
+      <div class="muted" style="font-size:12px;margin:4px 0 8px">Web sitesi ana sayfasındaki "Sosyalde ..." şeridi bu seçimlerden gelir. Bir platformda birden çok kanal olabilir; yalnız <b>işaretlediklerin</b> ana sayfada listelenir.</div>
+      <label class="row" style="margin:2px 0 8px"><input type="checkbox" id="t-home" ${edit&&t.showOnHome?'checked':''} style="width:auto"> Bu kanalı ana sayfada yayınla</label>
+      <div class="grid k2">
+        <div><label>Herkese açık adres (takip/katılım linki)</label><input id="t-url" type="text" placeholder="https://t.me/kanal · instagram.com/hesap" value="${edit&&t.publicUrl?h(t.publicUrl):''}"><div class="muted" style="font-size:11px;margin-top:4px">Ziyaretçinin tıklayacağı herkese açık adres. (Dış ID −100… gibi iç kimlikten farklıdır.)</div></div>
+        <div><label>Takipçi/üye sayısı (opsiyonel)</label><input id="t-followers" type="number" min="0" placeholder="ör. 12500" value="${edit&&(t.followerCount??'')!==''?t.followerCount:''}"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn pri" id="t-save">${edit?'Kaydet':'Hedef ekle'}</button><button class="btn" onclick="accountDetail('${accountId}')">Vazgeç</button></div>`);
+  $('#t-save').onclick=async()=>{
+    const ext=$('#t-ext').value.trim(), title=$('#t-title').value.trim();
+    if(!ext){ toast('Dış ID gerekli',true); return; }
+    if(!title){ toast('Başlık gerekli',true); return; }
+    const showOnHome=$('#t-home').checked, publicUrl=$('#t-url').value.trim()||null;
+    const fv=$('#t-followers').value.trim(), followerCount=fv===''?null:(parseInt(fv,10)||null);
+    if(showOnHome && !publicUrl){ toast('Ana sayfada göstermek için herkese açık adres gerekli',true); return; }
+    const body={externalTargetId:ext,type:$('#t-type').value,role:$('#t-role').value,categoryId:$('#t-cat').value||null,title,language:null,timeZone:null,characterLimit:null,showOnHome,publicUrl,followerCount};
+    try{
+      if(edit){ body.isActive=$('#t-active').checked; await api(`/social-accounts/targets/${t.id}`,{method:'PUT',body}); toast('Hedef güncellendi'); }
+      else { await api(`/social-accounts/${accountId}/targets`,{method:'POST',body}); toast('Hedef eklendi'); }
+      accountDetail(accountId);
+    }catch(e){ toast(e.message,true); }
+  };
+}
+async function toggleTarget(id, activate, accId){ const on=(activate===true||activate==='true'); try{ await api(`/social-accounts/targets/${id}/${on?'enable':'disable'}`,{method:'POST'}); toast(on?'Hedef açıldı':'Hedef kapatıldı'); accountDetail(accId); }catch(e){toast(e.message,true);} }
+async function deleteTarget(id, accId){ if(!confirm('Bu hedef KALICI olarak silinsin mi?'))return; try{ await api(`/social-accounts/targets/${id}`,{method:'DELETE'}); toast('Hedef silindi'); accountDetail(accId); }catch(e){toast(e.message,true);} }
 async function disableTarget(id){ try{ await api(`/social-accounts/targets/${id}/disable`,{method:'POST'}); toast('Hedef kapatıldı'); }catch(e){toast(e.message,true);} }
-async function disableAccount(id){ if(!confirm('Hesap kapatılsın mı?'))return; try{ await api(`/social-accounts/${id}/disable`,{method:'POST'}); toast('Hesap kapatıldı'); closeModal(); route(); }catch(e){toast(e.message,true);} }
+async function disableAccount(id){ if(!confirm('Hesap kapatılsın mı? (Kayıtlar durur, silinmez)'))return; try{ await api(`/social-accounts/${id}/disable`,{method:'POST'}); toast('Hesap kapatıldı'); closeModal(); route(); }catch(e){toast(e.message,true);} }
+async function deleteAccount(id){ if(!confirm('Hesap ve TÜM hedefleri KALICI olarak silinsin mi?'))return; try{ await api(`/social-accounts/${id}`,{method:'DELETE'}); toast('Hesap silindi'); closeModal(); route(); }catch(e){toast(e.message,true);} }
 
 /* ---------------- Yayınlar ---------------- */
 async function renderPublications(){
@@ -704,7 +883,7 @@ async function renderPublications(){
     S.page=page; S.status=st; S.q=q;
     const r=await api(`/publishing/publications?size=${SIZE}&page=${page}${st?`&status=${st}`:''}${q?`&q=${encodeURIComponent(q)}`:''}`);
     box.innerHTML=`<table><thead><tr><th>Kanal</th><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Tarih</th><th>Hata</th><th style="width:170px"></th></tr></thead><tbody>${
-      r.items.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td class="muted">${p.publishedAt?new Date(p.publishedAt).toLocaleString('tr'):new Date(p.createdAt).toLocaleString('tr')}</td><td class="muted" style="max-width:240px">${h(p.error||'')}</td><td class="row"><button class="btn sm" onclick="showDetail('${p.contentItemId}')">İçeriği aç</button>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
+      r.items.map(p=>`<tr><td>${h(p.channel)}</td><td class="muted">${p.title?`<div style="color:var(--text)">${h(p.title)}</div>`:''}${h(p.targetRef)}</td><td>${statusChip(p.status)}</td><td>${p.attempts}</td><td class="muted">${p.status==='Scheduled'?`⏰ ${fmtDT(p.scheduledAt)}`:(p.publishedAt?fmtDT(p.publishedAt):fmtDT(p.createdAt))}</td><td class="muted" style="max-width:240px">${h(p.error||'')}</td><td class="row"><button class="btn sm" onclick="showDetail('${p.contentItemId}')">İçeriği aç</button>${p.status==='Failed'?`<button class="btn sm" onclick="retryPub('${p.id}')">Yeniden dene</button>`:''}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
     }</tbody></table>${pagerBar(r.total,r.page,r.size)}`; }
   const reload=()=>{ page=1; S.page=1; load(); };
   $('#pf').onchange=reload; $('#pq').oninput=debounce(reload,350);
@@ -806,6 +985,73 @@ async function renderKill(){
     try{ await api('/killswitch',{method:'POST',body:{scope,key,engaged:next,reason}}); toast(next?'Durduruldu':'Açıldı'); route(); }catch(e){toast(e.message,true);} });
 }
 
+/* ---------------- Reklamlar ---------------- */
+async function renderAds(){
+  const list = await api('/settings').catch(()=>[]);
+  const cur={}; (list||[]).forEach(s=>{ if(!s.isSecret) cur[s.key]=s.maskedValue; });
+  const v=k=>cur[k]||'';
+  const on=k=>{const x=v(k);return x==='1'||x==='true'||x==='on';};
+  const webActive=on('home.ads_enabled')&&v('home.adsense_client');
+  const tgActive=!!(v('telegram.miniapp_url')&&v('ads.adsgram_block'));
+  $('#view').innerHTML=head('Reklamlar','Web (AdSense) ve Telegram (Adsgram) reklam anahtarlarını buradan gir, aç/kapat. İkisi ayrı yayıncıdır.')
+   + `<div class="grid k2" style="margin-bottom:16px">
+       <div class="stat"><div class="v">${webActive?'<span style="color:var(--ok)">Aktif</span>':'<span style="color:var(--muted)">Kapalı</span>'}</div><div class="l">Web sitesi reklamı (AdSense)</div></div>
+       <div class="stat"><div class="v">${tgActive?'<span style="color:var(--ok)">Aktif</span>':'<span style="color:var(--muted)">Kapalı</span>'}</div><div class="l">Telegram mini app reklamı (Adsgram)</div></div>
+      </div>
+
+     <div class="card">
+       <h3 style="margin-top:0">🌐 Web sitesi reklamları — Google AdSense</h3>
+       <div class="muted" style="font-size:12.5px;margin-bottom:12px">Blog (hermasadabiz.com) için reklam yayıncısı. Telegram'dan bağımsızdır. AdSense hesabından <b>yayıncı kimliğini</b> (ca-pub-...) al.</div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Reklamlar açık</div><label class="row" style="margin:0"><input type="checkbox" id="ad-web-on" ${on('home.ads_enabled')?'checked':''} style="width:auto"> Sitede reklam göster</label></div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">AdSense yayıncı kimliği</div><input type="text" id="ad-pub" value="${h(v('home.adsense_client'))}" placeholder="ca-pub-0000000000000000" style="flex:1;min-width:200px"></div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Reklam için min. kelime</div><input type="text" id="ad-minw" value="${h(v('seo.ads_min_words'))}" placeholder="400" style="flex:1;min-width:120px"></div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Çerez onayı (consent)</div><label class="row" style="margin:0"><input type="checkbox" id="ad-consent" ${on('seo.consent_required')?'checked':''} style="width:auto"> AB/consent bandı göster</label></div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Gizlilik URL</div><input type="text" id="ad-priv" value="${h(v('seo.privacy_url'))}" style="flex:1;min-width:180px"></div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Çerez politikası URL</div><input type="text" id="ad-cookie" value="${h(v('seo.cookie_url'))}" style="flex:1;min-width:180px"></div>
+       <div style="margin-bottom:10px"><div class="s-lbl muted" style="margin-bottom:4px">ads.txt içeriği (AdSense doğrulaması — /ads.txt olarak yayınlanır)</div><textarea id="ad-txt" style="width:100%;min-height:70px" placeholder="google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0">${h(v('seo.ads_txt'))}</textarea></div>
+       <button class="btn pri" id="ad-web-save">Web reklam ayarlarını kaydet</button>
+     </div>
+
+     <div class="card">
+       <h3 style="margin-top:0">✈️ Telegram Mini App reklamları — Adsgram</h3>
+       <div class="muted" style="font-size:12.5px;margin-bottom:12px">Telegram gönderilerindeki "Haber ayrıntısı" butonu mini app'te açılır. <b>Reklam izlet</b> işaretli gönderilerde, haber açılmadan önce Adsgram reklamı gösterilir.</div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Mini App linki</div><input type="text" id="ad-ma" value="${h(v('telegram.miniapp_url'))}" placeholder="https://t.me/BotKullaniciAdi/app" style="flex:1;min-width:220px"></div>
+       <div class="row" style="margin-bottom:10px"><div class="s-lbl muted">Adsgram Block ID</div><input type="text" id="ad-block" value="${h(v('ads.adsgram_block'))}" placeholder="int-12345" style="flex:1;min-width:160px"></div>
+       <button class="btn pri" id="ad-tg-save">Telegram reklam ayarlarını kaydet</button>
+       <div class="card" style="background:var(--panel2);margin-top:14px">
+         <b>📋 Mini App nasıl kurulur (tek seferlik)</b>
+         <ol class="muted" style="font-size:12.5px;line-height:1.7;margin:8px 0 0;padding-left:18px">
+           <li>Telegram'da <b>@BotFather</b> → <code>/newapp</code> → botunu seç.</li>
+           <li>Uygulama adı, açıklama, 640×360 görsel iste; <b>Web App URL</b> olarak şunu ver: <code id="ad-url" style="color:var(--accent)">${location.origin}/ad-gate</code> <button class="btn sm" id="ad-copy">Kopyala</button></li>
+           <li>BotFather sana bir link verir: <code>https://t.me/BotAdi/UygulamaAdi</code> — onu yukarıdaki <b>Mini App linki</b> kutusuna yapıştır.</li>
+           <li>Adsgram panelinden (adsgram.ai) bir <b>Block</b> oluştur, <b>Block ID</b>'yi yukarı yapıştır.</li>
+         </ol>
+         <div class="muted" style="font-size:12px;margin-top:8px">Not: Mini App URL'i <b>/ad-gate</b> olmalı — bu sayfa reklamı gösterip haberi mini app içinde açar. Reklam yalnız gönderi "Reklam izlet" işaretliyse çıkar; işaretsizse haber doğrudan açılır.</div>
+       </div>
+     </div>
+
+     <div class="card">
+       <h3 style="margin-top:0">Bir gönderiyi reklamlı yapmak</h3>
+       <div class="muted" style="font-size:13px">İçerik detayında <b>Yayınla</b>'nın yanındaki <b>"Reklam izlet (Adsgram)"</b> kutusunu işaretleyip yayınla. O gönderinin butonu mini app'te önce reklam gösterir. İşaretlemezsen o gönderi reklamsız açılır. Web sitesindeki (AdSense) reklamlar ise makale uzunluğuna göre otomatik yerleşir; kelime eşiğini yukarıdan ayarlarsın.</div>
+     </div>`;
+
+  async function save(pairs){ try{ for(const [k,val,sec] of pairs){ await api('/settings',{method:'PUT',body:{key:k,value:val,isSecret:!!sec}}); } toast('Kaydedildi'); route(); }catch(e){toast(e.message,true);} }
+  $('#ad-web-save').onclick=()=>save([
+    ['home.ads_enabled',$('#ad-web-on').checked?'1':'0'],
+    ['home.adsense_client',$('#ad-pub').value.trim()],
+    ['seo.ads_min_words',$('#ad-minw').value.trim()||'400'],
+    ['seo.consent_required',$('#ad-consent').checked?'1':'0'],
+    ['seo.privacy_url',$('#ad-priv').value.trim()],
+    ['seo.cookie_url',$('#ad-cookie').value.trim()],
+    ['seo.ads_txt',$('#ad-txt').value]
+  ]);
+  $('#ad-tg-save').onclick=()=>save([
+    ['telegram.miniapp_url',$('#ad-ma').value.trim()],
+    ['ads.adsgram_block',$('#ad-block').value.trim()]
+  ]);
+  $('#ad-copy').onclick=()=>{ navigator.clipboard&&navigator.clipboard.writeText($('#ad-url').textContent); toast('Kopyalandı'); };
+}
+
 /* ---------------- Ayarlar ---------------- */
 async function renderSite(){
   const list = await api('/settings').catch(()=>[]);
@@ -829,12 +1075,15 @@ async function renderSite(){
     ['Reklam & Uyum', [
       ['home.ads_enabled','Reklamlar açık','check'],
       ['home.adsense_client','AdSense yayıncı kimliği — ca-pub-…','text'],
+      ['home.adsense_slot','AdSense reklam birimi Slot ID (boş = Otomatik reklamlar / Auto ads)','text'],
       ['telegram.miniapp_url','Telegram Mini App linki (ör. https://t.me/BotAdi/app)','text'],
       ['ads.adsgram_block','Adsgram Block ID (mini-app reklamı)','text'],
       ['seo.ads_min_words','Reklam için min. kelime (kısa yazıya reklam yok)','text'],
-      ['seo.consent_required','Çerez onayı (consent) gerekli','check'],
-      ['seo.privacy_url','Gizlilik politikası URL','text'],
-      ['seo.cookie_url','Çerez politikası URL','text'],
+      ['seo.consent_required','Çerez onayı (consent) bandı gerekli','check'],
+      ['site.contact_email','İletişim / KVKK e-postası (yasal + iletişim sayfalarında görünür)','text'],
+      ['site.about_text','Hakkımızda metni (boş = otomatik; paragraflar boş satırla ayrılır)','area'],
+      ['seo.privacy_url','Gizlilik politikası URL (boş = yerleşik /gizlilik-politikasi)','text'],
+      ['seo.cookie_url','Çerez politikası URL (boş = yerleşik /cerez-politikasi)','text'],
       ['seo.ads_txt','ads.txt içeriği','area']
     ]]
   ];

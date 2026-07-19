@@ -62,6 +62,17 @@ public sealed class Publication : Entity
         Touch(clock);
     }
 
+    /// <summary>
+    /// İçerik düzenlenip yeniden yayına gönderildiğinde anlık kopyayı tazeler — retry ESKİ metni/görseli
+    /// göndermesin. Yayınlanmış kayda dokunmaz.
+    /// </summary>
+    public void RefreshPayload(string payloadJson, IClock clock)
+    {
+        if (Status == PublicationStatus.Published) return;
+        PayloadJson = payloadJson;
+        Touch(clock);
+    }
+
     /// <summary>Yayın zamanını değiştir. Geçmiş/boş → hemen ("Pending"); gelecek → "Scheduled". Yayınlanmışsa dokunma.</summary>
     public void Reschedule(DateTimeOffset? at, IClock clock)
     {

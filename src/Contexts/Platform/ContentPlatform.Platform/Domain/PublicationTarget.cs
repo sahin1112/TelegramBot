@@ -15,7 +15,8 @@ public sealed class PublicationTarget : Entity
     public PublicationTarget(
         Guid socialAccountId, PlatformKind platform, string externalTargetId, TargetType type,
         TargetRole role, Guid? categoryId, string title, string? language, string? timeZone,
-        int? characterLimit, IClock clock)
+        int? characterLimit, IClock clock,
+        bool showOnHome = false, string? publicUrl = null, int? followerCount = null)
     {
         SocialAccountId = socialAccountId;
         Platform = platform;
@@ -27,6 +28,9 @@ public sealed class PublicationTarget : Entity
         Language = language;
         TimeZone = timeZone;
         CharacterLimit = characterLimit;
+        ShowOnHome = showOnHome;
+        PublicUrl = publicUrl;
+        FollowerCount = followerCount;
         IsActive = true;
         CreatedAt = clock.UtcNow;
     }
@@ -43,5 +47,36 @@ public sealed class PublicationTarget : Entity
     public int? CharacterLimit { get; private set; }
     public bool IsActive { get; private set; }
 
+    /// <summary>Bu kanal ana sayfadaki "Sosyalde ..." şeridinde LİSTELENSİN mi? (Sosyal Hesaplar → yayınla seçimi)</summary>
+    public bool ShowOnHome { get; private set; }
+
+    /// <summary>Herkese açık takip/katılım adresi (ör. https://t.me/kanal, https://instagram.com/hesap).
+    /// ExternalTargetId (chat_id −100…) İÇ kimliktir; ana sayfada bu PublicUrl kullanılır.</summary>
+    public string? PublicUrl { get; private set; }
+
+    /// <summary>Ana sayfada gösterilecek takipçi/üye sayısı (opsiyonel, elle girilir).</summary>
+    public int? FollowerCount { get; private set; }
+
     public void Disable(IClock clock) { IsActive = false; Touch(clock); }
+    public void Enable(IClock clock) { IsActive = true; Touch(clock); }
+
+    /// <summary>Hedefin düzenlenebilir alanlarını günceller (Dış ID, tür, rol, kategori, başlık, ana sayfa yayını vb.).</summary>
+    public void Update(
+        string externalTargetId, TargetType type, TargetRole role, Guid? categoryId, string title,
+        string? language, string? timeZone, int? characterLimit, IClock clock,
+        bool showOnHome = false, string? publicUrl = null, int? followerCount = null)
+    {
+        ExternalTargetId = externalTargetId;
+        Type = type;
+        Role = role;
+        CategoryId = categoryId;
+        Title = title;
+        Language = language;
+        TimeZone = timeZone;
+        CharacterLimit = characterLimit;
+        ShowOnHome = showOnHome;
+        PublicUrl = publicUrl;
+        FollowerCount = followerCount;
+        Touch(clock);
+    }
 }

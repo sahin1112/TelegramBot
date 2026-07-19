@@ -2,7 +2,7 @@ using ContentPlatform.SharedKernel;
 
 namespace ContentPlatform.Editorial.Domain;
 
-public enum MediaKind { AiImage, SkiaCard, Manual }
+public enum MediaKind { AiImage, SkiaCard, Manual, Video }
 
 /// <summary>Bir içeriğin görseli. webp/png, düşük çözünürlük (maliyet/CDN).</summary>
 public sealed class MediaAsset : Entity

@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ContentPlatform.Abstractions;
 using ContentPlatform.SharedKernel;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace ContentPlatform.Publishing.Infrastructure.Telegram;
@@ -12,9 +13,15 @@ namespace ContentPlatform.Publishing.Infrastructure.Telegram;
 ///  - yalnız MediaUrl → URL ile sendPhoto
 ///  - görsel yok → sendMessage
 /// Kimlik (BotToken) ÇAĞRIDA gelir; hedef = chat/kanal id (TargetRef).
+///
+/// DETAY LİNKİ: Kanal gönderisine inline BUTON eklenirse Telegram'ın otomatik "Yorum/Tartışma"
+/// bölümü açılmıyor. Bu yüzden VARSAYILAN olarak detay linki METİN İÇİNE (caption) HTML bağlantı
+/// olarak konur ve inline buton EKLENMEZ → yorumlar çalışır. appsettings "Telegram:DetailLinkInCaption=false"
+/// ile eski buton davranışına dönülebilir.
 /// </summary>
 internal sealed class TelegramPublisher(
     IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
     ILogger<TelegramPublisher> logger) : IChannelPublisher
 {
     public const string HttpClientName = "telegram";
@@ -27,10 +34,19 @@ internal sealed class TelegramPublisher(
 
         var client = httpClientFactory.CreateClient(HttpClientName);
         var baseUrl = $"https://api.telegram.org/bot{token}";
-        var caption = BuildText(request);
-        System.Text.Json.JsonElement? replyMarkup = string.IsNullOrWhiteSpace(request.ButtonUrl)
-            ? null
-            : JsonSerializer.SerializeToElement(new { inline_keyboard = new[] { new[] { new { text = string.IsNullOrWhiteSpace(request.ButtonText) ? "Devamını oku" : request.ButtonText, url = request.ButtonUrl } } } });
+
+        // Detay linki metin içinde mi (buton yerine)? Varsayılan EVET → kanal yorumları açık kalır.
+        // Yalnız açıkça "false" yazılırsa eski inline buton davranışına döner (IConfiguration indeksleyici;
+        // Binder eklentisine bağımlılık yok).
+        var linkInCaption = !string.Equals(configuration["Telegram:DetailLinkInCaption"], "false", StringComparison.OrdinalIgnoreCase);
+        var caption = BuildText(request, linkInCaption);
+
+        // Inline buton YALNIZ 'metin-içi link KAPALI' iken ve URL public ise eklenir. Caption modunda
+        // reply_markup GÖNDERİLMEZ → kanalın otomatik yorum/tartışma bölümü çalışır. Public değilse
+        // (localhost/göreli/boş) buton yine düşürülür — "inline keyboard button URL is invalid" hatasını önler.
+        System.Text.Json.JsonElement? replyMarkup = (!linkInCaption && IsPublicHttpUrl(request.ButtonUrl))
+            ? JsonSerializer.SerializeToElement(new { inline_keyboard = new[] { new[] { new { text = string.IsNullOrWhiteSpace(request.ButtonText) ? "Devamını oku" : request.ButtonText, url = request.ButtonUrl } } } })
+            : null;
 
         try
         {
@@ -51,10 +67,36 @@ internal sealed class TelegramPublisher(
                 form.Add(photo, "photo", media.FileName);
                 response = await client.PostAsync($"{baseUrl}/sendPhoto", form, ct);
             }
-            else if (!string.IsNullOrWhiteSpace(request.MediaUrl))
+            else if (IsPublicHttpUrl(request.MediaUrl))
             {
+                // Sadece Telegram'ın çekebileceği PUBLIC http(s) URL gönder. Göreli/localhost URL
+                // ("/media/x.png") "invalid file HTTP URL: URL host is empty" verir → bu dala GİRME,
+                // görselsiz metne düş (multipart bytes yolu zaten yukarıda; bu yalnız fallback).
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendPhoto",
                     new { chat_id = request.TargetRef, photo = request.MediaUrl, caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
+            }
+            else if (request.VideoMedia is { } vm)
+            {
+                // VİDEO — dosya olarak (multipart sendVideo; en sağlam yol, public URL gerekmez).
+                using var form = new MultipartFormDataContent
+                {
+                    { new StringContent(request.TargetRef), "chat_id" },
+                    { new StringContent(caption), "caption" },
+                    { new StringContent("HTML"), "parse_mode" },
+                    { new StringContent("true"), "supports_streaming" }
+                };
+                if (replyMarkup is not null)
+                    form.Add(new StringContent(replyMarkup.Value.GetRawText()), "reply_markup");
+                var video = new ByteArrayContent(vm.Bytes);
+                video.Headers.TryAddWithoutValidation("Content-Type", vm.ContentType);
+                form.Add(video, "video", vm.FileName);
+                response = await client.PostAsync($"{baseUrl}/sendVideo", form, ct);
+            }
+            else if (IsPublicHttpUrl(request.VideoUrl))
+            {
+                // VİDEO — yerel dosya okunamadıysa public URL yedeği (Telegram kendisi indirir; limit 20 MB).
+                response = await client.PostAsJsonAsync($"{baseUrl}/sendVideo",
+                    new { chat_id = request.TargetRef, video = request.VideoUrl, caption, parse_mode = "HTML", supports_streaming = true, reply_markup = replyMarkup }, ct);
             }
             else
             {
@@ -79,14 +121,50 @@ internal sealed class TelegramPublisher(
         }
     }
 
-    private static string BuildText(PublishRequest r)
+    private static string BuildText(PublishRequest r, bool linkInCaption)
     {
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(r.Title)) parts.Add($"<b>{r.Title}</b>");
         if (!string.IsNullOrWhiteSpace(r.Text)) parts.Add(r.Text);
         if (r.Hashtags.Count > 0) parts.Add(string.Join(' ', r.Hashtags));
-        if (!string.IsNullOrWhiteSpace(r.Link) && string.IsNullOrWhiteSpace(r.ButtonUrl)) parts.Add(r.Link);
+
+        if (linkInCaption)
+        {
+            // Detay linkini METİN İÇİNE HTML bağlantı olarak koy (buton yok → yorumlar açık).
+            // Öncelik: mini-app derin linki (ButtonUrl); yoksa doğrudan makale linki (Link).
+            var detailUrl = IsPublicHttpUrl(r.ButtonUrl) ? r.ButtonUrl : (IsPublicHttpUrl(r.Link) ? r.Link : null);
+            if (detailUrl is not null)
+            {
+                var label = string.IsNullOrWhiteSpace(r.ButtonText) ? "Haber ayrıntısı için tıkla" : r.ButtonText;
+                parts.Add($"🔗 <a href=\"{HtmlEscape(detailUrl)}\">{HtmlEscape(label)}</a>");
+            }
+        }
+        else
+        {
+            // Eski davranış: buton public değilse (düşürülecek) ve Link public ise linki düz metne koy.
+            if (IsPublicHttpUrl(r.Link) && !IsPublicHttpUrl(r.ButtonUrl)) parts.Add(r.Link!);
+        }
         return string.Join("\n\n", parts);
+    }
+
+    /// <summary>Telegram HTML parse_mode için '&lt; &gt; &amp;' kaçışı (link href ve etiket metni için).</summary>
+    private static string HtmlEscape(string s) =>
+        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+    /// <summary>
+    /// Telegram'a verilebilecek geçerli, dışarıdan erişilebilir http(s) URL mi? localhost / 127.0.0.1 /
+    /// göreli yollar (host'suz) REDDEDİLİR. Hem buton URL'si hem de foto URL fallback'i bununla korunur.
+    /// </summary>
+    private static bool IsPublicHttpUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return false;
+        var host = uri.Host;
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        if (host is "127.0.0.1" or "0.0.0.0" or "::1") return false;
+        return true;
     }
 
     private sealed record TelegramResponse(

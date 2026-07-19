@@ -11,6 +11,6 @@ public interface IContentRepository
     Task<IReadOnlyList<ContentItem>> GetByStatusAsync(EditorialStatus status, int take, CancellationToken ct);
     Task<IReadOnlyList<ContentItem>> GetForGenerationAsync(int take, CancellationToken ct);
     Task<IReadOnlyList<ContentItem>> GetAwaitingManualImageAsync(int take, CancellationToken ct);
-    Task<(IReadOnlyList<ContentItem> Items, int Total)> GetPagedAsync(EditorialStatus? status, string? search, int page, int size, CancellationToken ct);
+    Task<(IReadOnlyList<ContentItem> Items, int Total)> GetPagedAsync(EditorialStatus? status, string? search, int page, int size, bool ascending, CancellationToken ct);
     Task SaveChangesAsync(CancellationToken ct);
 }

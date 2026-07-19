@@ -29,6 +29,7 @@ public sealed class SiteModule : IModule
         services.AddScoped<IBlogRepository, BlogRepository>();
         services.AddScoped<BlogQueryService>();
         services.AddScoped<CommentService>();
+        services.AddScoped<NewsletterService>();
         services.AddScoped<IIntegrationEventHandler<ContentReadyToPublishIntegrationEvent>, ContentReadyToPublishBlogHandler>();
     }
 

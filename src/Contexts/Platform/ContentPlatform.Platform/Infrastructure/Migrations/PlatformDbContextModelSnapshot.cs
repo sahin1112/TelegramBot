@@ -148,6 +148,9 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<int?>("FollowerCount")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -159,10 +162,17 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
 
+                    b.Property<string>("PublicUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
+
+                    b.Property<bool>("ShowOnHome")
+                        .HasColumnType("bit");
 
                     b.Property<Guid>("SocialAccountId")
                         .HasColumnType("uniqueidentifier");
@@ -189,6 +199,8 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("Platform", "Role", "IsActive");
+
+                    b.HasIndex("ShowOnHome", "IsActive");
 
                     b.ToTable("publication_targets", "platform");
                 });

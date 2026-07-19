@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ContentPlatform.Publishing.Application;
 using ContentPlatform.Publishing.Domain;
 using ContentPlatform.SharedKernel;
@@ -42,8 +43,12 @@ internal static class PublishingEndpoints
         });
 
         // Manuel yeniden dene (dead-letter kurtarma)
-        g.MapPost("/publications/{id:guid}/retry", async (Guid id, IPublicationRepository repo, DistributionService dist, CancellationToken ct) =>
+        // NOT: İstek iptaline (sekme kapanır/zaman aşımı) BAĞLANMAZ (CancellationToken.None) —
+        // gönderim yapıldıysa durumu MUTLAKA kaydedilmeli; yoksa yayın "gitti ama Planlı kaldı"
+        // tutarsızlığı oluşur ve planlı saatte İKİNCİ kez gider.
+        g.MapPost("/publications/{id:guid}/retry", async (Guid id, IPublicationRepository repo, DistributionService dist) =>
         {
+            var ct = CancellationToken.None;
             var p = await repo.GetAsync(id, ct);
             if (p is null) return Results.NotFound();
             if (p.Status == PublicationStatus.Published) return Results.Ok(new { message = "Zaten yayınlanmış." });
@@ -67,8 +72,10 @@ internal static class PublishingEndpoints
         });
 
         // Şimdi yayınla (planı geç, hemen gönder)
-        g.MapPost("/publications/{id:guid}/publish-now", async (Guid id, IPublicationRepository repo, DistributionService dist, IClock clock, CancellationToken ct) =>
+        // İstek iptaline bağlanmaz (yukarıdaki retry ile aynı gerekçe): gönderim sonucu MUTLAKA kaydedilir.
+        g.MapPost("/publications/{id:guid}/publish-now", async (Guid id, IPublicationRepository repo, DistributionService dist, IClock clock) =>
         {
+            var ct = CancellationToken.None;
             var p = await repo.GetAsync(id, ct);
             if (p is null) return Results.NotFound();
             if (p.Status == PublicationStatus.Published) return Results.Ok(new { message = "Zaten yayınlanmış." });
@@ -91,5 +98,12 @@ internal static class PublishingEndpoints
 
     private static PublicationDto Dto(Publication p) => new(
         p.Id, p.ContentItemId, p.Channel.ToString(), p.TargetRef, p.Status.ToString(),
-        p.ExternalId, p.Attempts, p.Error, p.CreatedAt, p.ScheduledAt, p.PublishedAt);
+        p.ExternalId, p.Attempts, p.Error, p.CreatedAt, p.ScheduledAt, p.PublishedAt, TitleOf(p));
+
+    /// <summary>Panelde "hangi içerik?" görünsün diye başlığı anlık kopyadan (payload) çözer.</summary>
+    private static string? TitleOf(Publication p)
+    {
+        try { return JsonSerializer.Deserialize<PublicationPayload>(p.PayloadJson)?.Title; }
+        catch { return null; }
+    }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ContentPlatform.Abstractions;
@@ -16,23 +17,21 @@ public sealed class ContentReadyToPublishHandler(
     IPublicationTargetResolver targetResolver,
     IPublicationRepository publications,
     DistributionService distribution,
+    IChannelPublisherRegistry registry,
     ISettingsProvider settings,
     ISchedulePlanner planner,
     IClock clock,
     ILogger<ContentReadyToPublishHandler> logger)
     : IIntegrationEventHandler<ContentReadyToPublishIntegrationEvent>
 {
+    /// <summary>Sosyal yayın kanalları (Blog hariç). Yalnız ADAPTÖRÜ KAYITLI olanlara dağıtılır —
+    /// adaptörsüz kanala Publication açılmaz (Failed kirliliği/istikrarsızlık olmaz). Yeni adaptör
+    /// eklendiğinde (X/IG/Threads/YouTube/TikTok) o kanal OTOMATİK devreye girer.</summary>
+    private static readonly Channel[] SocialChannels =
+        { Channel.Telegram, Channel.X, Channel.Instagram, Channel.Threads, Channel.Youtube, Channel.TikTok };
+
     public async Task HandleAsync(ContentReadyToPublishIntegrationEvent e, CancellationToken ct)
     {
-        const Channel channel = Channel.Telegram; // MVP; diğer kanallar aynı desenle
-
-        var targets = await targetResolver.ResolveAsync(e.CategoryId, e.TestMode, channel, ct);
-        if (targets.Count == 0)
-        {
-            logger.LogInformation("Yayın hedefi yok (kategori={Cat}, test={Test}).", e.CategoryId, e.TestMode);
-            return;
-        }
-
         // Yayın zamanı: TEST içerik daima HEMEN (test kanalı). Aksi halde elle verilen zaman,
         // o da yoksa kategori kadans politikasından bir sonraki slot. null → hemen.
         DateTimeOffset? scheduledAt = null;
@@ -40,34 +39,58 @@ public sealed class ContentReadyToPublishHandler(
             scheduledAt = e.ScheduledAt ?? await planner.NextSlotAsync(e.CategoryId, ct);
 
         var (buttonUrl, buttonText) = await BuildDetailButtonAsync(e, ct);
-        var payloadJson = JsonSerializer.Serialize(new PublicationPayload(e.Title, e.ShortX, e.Tags, e.MediaUrl, e.Link, buttonUrl, buttonText));
+        // Etiketler ham metin degil HASHTAG olarak gider: "kripto, bitcoin" -> #Kripto #Bitcoin
+        var payloadJson = JsonSerializer.Serialize(new PublicationPayload(e.Title, e.ShortX, ToHashtags(e.Tags), e.MediaUrl, e.Link, buttonUrl, buttonText, e.VideoUrl, e.InstagramCaption));
 
-        foreach (var target in targets)
+        var totalTargets = 0;
+        foreach (var channel in SocialChannels)
         {
-            var existing = await publications.FindAsync(e.ContentItemId, channel, target.ExternalTargetId, ct);
-            if (existing is { Status: PublicationStatus.Published }) continue; // idempotent
+            if (!registry.Supports(channel)) continue; // adaptörü yok → bu kanala hiç Publication açma
 
-            var pub = existing;
-            if (pub is null)
-            {
-                pub = new Publication(e.ContentItemId, channel, target.SocialAccountId, target.ExternalTargetId, payloadJson,
-                    e.CategoryId, scheduledAt, clock);
-                await publications.AddAsync(pub, ct);
-            }
+            var targets = await targetResolver.ResolveAsync(e.CategoryId, e.TestMode, channel, ct);
+            if (targets.Count == 0) continue;
+            totalTargets += targets.Count;
 
-            // Gelecek bir zamana planlıysa şimdi gönderme; ScheduledDispatchJob zamanı gelince gönderir.
-            if (pub.Status == PublicationStatus.Scheduled)
+            foreach (var target in targets)
             {
+                var existing = await publications.FindAsync(e.ContentItemId, channel, target.ExternalTargetId, ct);
+                if (existing is { Status: PublicationStatus.Published }) continue; // idempotent
+
+                var pub = existing;
+                if (pub is null)
+                {
+                    pub = new Publication(e.ContentItemId, channel, target.SocialAccountId, target.ExternalTargetId, payloadJson,
+                        e.CategoryId, scheduledAt, clock);
+                    await publications.AddAsync(pub, ct);
+                }
+                else
+                {
+                    // İçerik yeniden yayına gönderildi (düzenleme / elle "Yayınla"): anlık kopyayı tazele.
+                    pub.RefreshPayload(payloadJson, clock);
+                    // Elle yeni zaman verildiyse ona çek; Failed ise plana/hemene alıp YENİDEN dene.
+                    if (e.ScheduledAt is not null || pub.Status == PublicationStatus.Failed)
+                        pub.Reschedule(e.ScheduledAt ?? scheduledAt, clock);
+                }
+
+                // Gelecek bir zamana planlıysa şimdi gönderme; ScheduledDispatchJob zamanı gelince gönderir.
+                if (pub.Status == PublicationStatus.Scheduled)
+                {
+                    await publications.SaveChangesAsync(ct);
+                    continue;
+                }
+
+                await distribution.PublishOneAsync(pub, ct);
                 await publications.SaveChangesAsync(ct);
-                continue;
             }
-
-            await distribution.PublishOneAsync(pub, ct);
-            await publications.SaveChangesAsync(ct);
         }
 
+        if (totalTargets == 0)
+        {
+            logger.LogInformation("Yayın hedefi yok (kategori={Cat}, test={Test}).", e.CategoryId, e.TestMode);
+            return;
+        }
         if (scheduledAt is { } at)
-            logger.LogInformation("İçerik {Id} {Time} için planlandı ({Count} hedef).", e.ContentItemId, at, targets.Count);
+            logger.LogInformation("İçerik {Id} {Time} için planlandı ({Count} hedef).", e.ContentItemId, at, totalTargets);
     }
     /// <summary>
     /// Gonderi altindaki "Haber ayrintisi" butonunu kurar. AdGate ise Mini App derin linki (Adsgram reklami),
@@ -79,17 +102,24 @@ public sealed class ContentReadyToPublishHandler(
         const string text = "Haber ayrıntısı için tıkla";
 
         var url = e.Link;
-        if (e.AdGate)
+        // Mini App tanimliysa haber HER ZAMAN mini app icinde acilir (Telegram'dan cikmadan).
+        // Reklam yalniz 'Reklam izlet' isaretliyse gosterilir: startapp sonuna "--ad" eklenir;
+        // /ad-gate sayfasi bu isarete gore Adsgram'i acar ya da dogrudan habere gecer.
+        var miniapp = await settings.GetAsync("telegram.miniapp_url", ct);
+        if (!string.IsNullOrWhiteSpace(miniapp))
         {
-            var miniapp = await settings.GetAsync("telegram.miniapp_url", ct);
-            if (!string.IsNullOrWhiteSpace(miniapp))
-            {
-                var i = e.Link.IndexOf("/blog/", StringComparison.Ordinal);
-                var slug = i >= 0 ? e.Link[(i + 6)..] : "";
-                slug = Regex.Replace(slug, "[^A-Za-z0-9_-]", "");
-                var sep = miniapp.Contains('?') ? "&" : "?";
-                url = $"{miniapp}{sep}startapp={slug}";
-            }
+            // Panelde 't.me/Bot/app' gibi ŞEMASIZ girilirse geçersiz sayılıp linkin siteye düşmesini önle:
+            // http(s) yoksa başına https:// ekle.
+            miniapp = miniapp.Trim();
+            if (!miniapp.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !miniapp.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                miniapp = "https://" + miniapp;
+            // Telegram startapp EN FAZLA 64 KARAKTER; uzun haber slug'ları kırpılıp mini app ANA SAYFAYA
+            // düşüyordu. Bu yüzden startapp'a KISA kod (ContentItemId, 32 hex) koyuyoruz; site /r/{kod}
+            // ile bunu gerçek slug'a çevirip makaleye yönlendirir. (kod + "--ad" en fazla 36 karakter.)
+            var code = e.ContentItemId.ToString("N");
+            var sep = miniapp.Contains('?') ? "&" : "?";
+            url = $"{miniapp}{sep}startapp={code}{(e.AdGate ? "--ad" : "")}";
         }
 
         // Telegram inline buton URL'i herkese açık geçerli bir http(s) adresi olmalı.
@@ -100,6 +130,32 @@ public sealed class ContentReadyToPublishHandler(
             return (null, null);
         }
         return (url, text);
+    }
+
+    /// <summary>
+    /// Etiket listesini sosyal medya hashtag'lerine çevirir: tek etikete sıkışmış virgüllüler ayrılır,
+    /// noktalama temizlenir, çok kelimeliler BüyükHarfle bitişik yazılır (#YapayZeka).
+    /// '_' ile başlayan iç işaretler (örn. _ads) HİÇBİR ZAMAN yayınlanmaz. En fazla 8 hashtag.
+    /// </summary>
+    internal static IReadOnlyList<string> ToHashtags(IEnumerable<string>? tags)
+    {
+        var tr = CultureInfo.GetCultureInfo("tr-TR");
+        var list = new List<string>();
+        foreach (var raw in tags ?? Enumerable.Empty<string>())
+        {
+            foreach (var piece in (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (piece.StartsWith('_')) continue; // iç işaret — dışarı sızmaz
+                var words = Regex.Matches(piece, @"[\p{L}\p{Nd}]+").Select(m => m.Value).ToList();
+                if (words.Count == 0) continue;
+                var joined = string.Concat(words.Select(w =>
+                    char.ToUpper(w[0], tr) + (w.Length > 1 ? w[1..].ToLower(tr) : "")));
+                var tag = "#" + joined;
+                if (!list.Contains(tag, StringComparer.OrdinalIgnoreCase)) list.Add(tag);
+                if (list.Count >= 8) return list;
+            }
+        }
+        return list;
     }
 
     private static bool IsPublicHttpUrl(string? url)
