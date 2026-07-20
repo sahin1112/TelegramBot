@@ -24,8 +24,19 @@ public sealed class ScheduledDispatchJob(
         {
             // Atomik sahiplenme: Api'deki yedek gönderici aynı anda çalışıyorsa çifte gönderim olmasın.
             if (!await publications.TryClaimScheduledAsync(pub.Id, ct)) continue;
-            if (await distribution.PublishOneAsync(pub, ct)) ok++;
-            await publications.SaveChangesAsync(ct);
+            try
+            {
+                if (await distribution.PublishOneAsync(pub, ct)) ok++;
+                await publications.SaveChangesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                // TEK yayının hatası turu ÖLDÜRMESİN; sahiplenilen kayıt Pending'de takılı kalmasın
+                // diye 1 dk sonraya yeniden planlanır (kayıt iptalden etkilenmesin: None ile yazılır).
+                logger.LogError(ex, "Planlı yayın gönderilemedi (id={Id}); 1 dk sonraya yeniden planlandı.", pub.Id);
+                try { pub.Reschedule(clock.UtcNow.AddMinutes(1), clock); await publications.SaveChangesAsync(CancellationToken.None); }
+                catch (Exception ex2) { logger.LogError(ex2, "Planlı yayın kurtarma kaydı başarısız (id={Id}).", pub.Id); }
+            }
         }
         if (due.Count > 0) logger.LogInformation("ScheduledDispatchJob: {Ok}/{Total} planlı yayın gönderildi.", ok, due.Count);
     }

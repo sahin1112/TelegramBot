@@ -21,6 +21,15 @@ public sealed class DistributionService(
     IClock clock,
     ILogger<DistributionService> logger)
 {
+    /// <summary>Toplam deneme hakkı (ilk gönderim dahil). Hak bitince Failed = dead-letter (panelden elle).</summary>
+    public const int MaxAttempts = 5;
+
+    /// <summary>Deneme sayısına göre ARTAN yeniden-planlama gecikmesi: 1 → 2 → 5 → 10 dk.
+    /// Amaç: geçici platform sorunlarında (rate limit, kısa kesinti) ard arda vurmak yerine
+    /// yalnız o hedefi ileriye planlamak — öteki platformların yayını hiç etkilenmez.</summary>
+    internal static TimeSpan RetryDelay(int attemptsSoFar) =>
+        TimeSpan.FromMinutes(attemptsSoFar switch { 0 => 1, 1 => 2, 2 => 5, _ => 10 });
+
     /// <summary>Platform başına varsayılan medya önceliği (panelden media.pref.{kanal} ile değişir).
     /// "video" → video varsa video, yoksa görsel · "image" → görsel varsa görsel, yoksa video.</summary>
     private static string DefaultPref(Channel c) => c switch
@@ -46,8 +55,17 @@ public sealed class DistributionService(
         var credentials = await credentialProvider.GetAsync(pub.SocialAccountId, ct);
         if (credentials is null) { pub.MarkFailed("Hesap kimliği çözülemedi", clock); return false; }
 
-        var payload = JsonSerializer.Deserialize<PublicationPayload>(pub.PayloadJson)
+        PublicationPayload payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<PublicationPayload>(pub.PayloadJson)
                       ?? new PublicationPayload(null, "", Array.Empty<string>(), null, null);
+        }
+        catch (Exception ex)
+        {
+            pub.MarkFailed("Payload çözülemedi: " + ex.Message, clock); // kalıcı — retry düzeltmez
+            return false;
+        }
 
         MediaContent? media = null;
         if (!string.IsNullOrWhiteSpace(payload.MediaUrl))
@@ -94,18 +112,42 @@ public sealed class DistributionService(
             pub.Channel, payload.Title, text, payload.Hashtags,
             mediaUrl, payload.Link, pub.TargetRef, media, payload.ButtonUrl, payload.ButtonText, videoUrl, videoMedia);
 
-        var result = await registry.Resolve(pub.Channel).PublishAsync(request, credentials, ct);
+        PublishResult result;
+        try
+        {
+            result = await registry.Resolve(pub.Channel).PublishAsync(request, credentials, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // İptal (kapanış vb.) — platformun suçu değil: deneme hakkı YAKMADAN 1 dk sonraya planla.
+            pub.Reschedule(clock.UtcNow.AddMinutes(1), clock);
+            logger.LogWarning("Yayın iptal edildi; 1 dk sonraya yeniden planlandı: kanal={Channel} hedef={Target}", pub.Channel, pub.TargetRef);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            // Adaptörler normalde PublishResult döner; buraya düşen beklenmeyen hata da yayını öldürmez.
+            pub.MarkFailedWithRetry("Beklenmeyen hata: " + ex.Message, RetryDelay(pub.Attempts), MaxAttempts, clock);
+            logger.LogError(ex, "Yayın adaptörü beklenmeyen hata: kanal={Channel} hedef={Target} durum={Status}", pub.Channel, pub.TargetRef, pub.Status);
+            return false;
+        }
 
         if (result.Published)
         {
             pub.MarkPublished(result.ExternalId, clock);
-            await bus.PublishAsync(new ContentPublishedIntegrationEvent(Guid.NewGuid(), clock.UtcNow, pub.ContentItemId), ct);
+            // Olay işleyicisi (içeriği Published işaretleme) patlarsa bile YAYIN BAŞARILIDIR —
+            // kayıt Failed'a düşürülmez; yoksa aynı gönderi İKİNCİ kez giderdi.
+            try { await bus.PublishAsync(new ContentPublishedIntegrationEvent(Guid.NewGuid(), clock.UtcNow, pub.ContentItemId), ct); }
+            catch (Exception ex) { logger.LogWarning(ex, "ContentPublished olayı işlenemedi (yayın başarılı): içerik={Id}", pub.ContentItemId); }
             logger.LogInformation("Yayınlandı: hedef={Target} extId={ExtId}", pub.TargetRef, result.ExternalId);
             return true;
         }
 
-        pub.MarkFailed(result.Error?.Message, clock);
-        logger.LogWarning("Yayın hatası: hedef={Target} deneme={Attempts} hata={Error}", pub.TargetRef, pub.Attempts, result.Error?.Message);
+        // Platform hata döndürdü: yalnız BU hedef artan gecikmeyle yeniden planlanır (1-2-5-10 dk);
+        // hak bitince Failed (dead-letter). Öteki platformlar bu hatadan ETKİLENMEZ.
+        pub.MarkFailedWithRetry(result.Error?.Message, RetryDelay(pub.Attempts), MaxAttempts, clock);
+        logger.LogWarning("Yayın hatası: kanal={Channel} hedef={Target} deneme={Attempts} durum={Status} hata={Error}",
+            pub.Channel, pub.TargetRef, pub.Attempts, pub.Status, result.Error?.Message);
         return false;
     }
 

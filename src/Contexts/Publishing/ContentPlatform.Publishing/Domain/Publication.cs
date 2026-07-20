@@ -63,6 +63,42 @@ public sealed class Publication : Entity
     }
 
     /// <summary>
+    /// Başarısız denemeyi kaydeder; deneme hakkı KALDIYSA yalnız BU HEDEFİ verilen gecikmeyle yeniden
+    /// PLANLAR (Scheduled → zamanı gelince ScheduledDispatch gönderir), hak bittiyse kalıcı Failed
+    /// (panelden elle "Yeniden dene"). Öteki kanalların/hedeflerin yayınını ETKİLEMEZ — 4 platformdan
+    /// biri hata verirse yalnız o platform 1-2-5-10 dk sonra yeniden denenir.
+    /// </summary>
+    public void MarkFailedWithRetry(string? error, TimeSpan retryDelay, int maxAttempts, IClock clock)
+    {
+        if (Status == PublicationStatus.Published) return;
+        Attempts++;
+        Error = error;
+        _attempts.Add(new DeliveryAttempt(Id, Attempts, DeliveryOutcome.Failed, error, clock));
+        if (Attempts < maxAttempts)
+        {
+            Status = PublicationStatus.Scheduled;
+            ScheduledAt = clock.UtcNow.Add(retryDelay);
+        }
+        else
+        {
+            Status = PublicationStatus.Failed; // dead-letter: otomatik denenmez, panelden elle denenir
+        }
+        Touch(clock);
+    }
+
+    /// <summary>
+    /// Yayını hedefin GÜNCEL sosyal hesabına bağlar. Hesap silinip yeniden bağlandığında (yeni Id)
+    /// eski yayınlar eski hesaba işaret edip "kimlik çözülemedi" ile ölüyordu; yeniden yayına
+    /// gönderimde hedef çözümü güncel hesabı verir, bu metod kaydı ona taşır. Yayınlanmışsa dokunmaz.
+    /// </summary>
+    public void Rebind(Guid socialAccountId, IClock clock)
+    {
+        if (Status == PublicationStatus.Published || SocialAccountId == socialAccountId) return;
+        SocialAccountId = socialAccountId;
+        Touch(clock);
+    }
+
+    /// <summary>
     /// İçerik düzenlenip yeniden yayına gönderildiğinde anlık kopyayı tazeler — retry ESKİ metni/görseli
     /// göndermesin. Yayınlanmış kayda dokunmaz.
     /// </summary>

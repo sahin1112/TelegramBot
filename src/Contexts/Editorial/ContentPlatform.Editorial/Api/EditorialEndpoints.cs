@@ -38,11 +38,14 @@ internal static class EditorialEndpoints
             return Results.Ok(items.Select(Summary));
         });
 
-        // ---- İçerik listesi (durum filtreli, sayfalı) ----
-        g.MapGet("/", async (string? status, string? q, int? page, int? size, bool? asc, IContentRepository repo, CancellationToken ct) =>
+        // ---- İçerik listesi (durum + kategori filtreli, sayfalı) ----
+        // category: boş → tümü; "none" → kategorisiz; guid → yalnız o kategori (panelde kategori izolasyonu).
+        g.MapGet("/", async (string? status, string? q, string? category, int? page, int? size, bool? asc, IContentRepository repo, CancellationToken ct) =>
         {
             EditorialStatus? st = Enum.TryParse<EditorialStatus>(status, true, out var s) ? s : null;
-            var (items, total) = await repo.GetPagedAsync(st, q, page ?? 1, size ?? 20, asc ?? false, ct);
+            var uncategorized = string.Equals(category, "none", StringComparison.OrdinalIgnoreCase);
+            Guid? catId = (!uncategorized && Guid.TryParse(category, out var cg)) ? cg : null;
+            var (items, total) = await repo.GetPagedAsync(st, q, catId, uncategorized, page ?? 1, size ?? 20, asc ?? false, ct);
             return Results.Ok(new PagedContentDto(items.Select(Summary).ToList(), page ?? 1, size ?? 20, total));
         });
 
@@ -71,7 +74,9 @@ internal static class EditorialEndpoints
             bool? published = null; string? note = null;
             if (item.MediaStatus == MediaStatus.Ready && item.Revisions.Any(rv => rv.IsCurrent))
             {
-                var pr = await gen.PublishExistingAsync(id, adGate: false, ct);
+                // İstek iptaline BAĞLANMAZ (retry/publish-now ile aynı gerekçe): tarayıcı/proxy zaman
+                // aşımı dağıtımı ortadan kesip "2 platforma gitti, 2'sine hiç açılmadı" bırakıyordu.
+                var pr = await gen.PublishExistingAsync(id, adGate: false, CancellationToken.None);
                 published = pr.IsSuccess;
                 if (pr.IsFailure) note = pr.Error.Message;
             }
@@ -85,15 +90,17 @@ internal static class EditorialEndpoints
 
         // ---- Yayınla (kalite kapısında tutulan / hazır içeriği elle yayına gönder) ----
         // Tek seferlik TEST gönderimi: test hedeflerine HEMEN yayınlar; asıl yayın akışını değiştirmez.
-        g.MapPost("/{id:guid}/send-test", async (Guid id, ContentGenerationService gen, CancellationToken ct) =>
+        g.MapPost("/{id:guid}/send-test", async (Guid id, ContentGenerationService gen) =>
         {
-            var r = await gen.SendTestAsync(id, ct);
+            var r = await gen.SendTestAsync(id, CancellationToken.None); // dağıtım istek iptaline bağlanmaz
             return r.IsSuccess ? Results.Ok() : Results.BadRequest(r.Error);
         });
 
-        g.MapPost("/{id:guid}/publish", async (Guid id, bool? adGate, ContentGenerationService gen, CancellationToken ct) =>
+        g.MapPost("/{id:guid}/publish", async (Guid id, bool? adGate, ContentGenerationService gen) =>
         {
-            var r = await gen.PublishExistingAsync(id, adGate ?? false, ct);
+            // Dağıtım istek iptaline BAĞLANMAZ — IG/X video işleme beklemeleri dakikalar sürebilir;
+            // istek zaman aşımına düşse bile kalan platformların gönderimi ve kayıt tamamlanır.
+            var r = await gen.PublishExistingAsync(id, adGate ?? false, CancellationToken.None);
             return r.IsSuccess ? Results.Ok() : Results.Conflict(r.Error);
         });
 
@@ -149,7 +156,7 @@ internal static class EditorialEndpoints
                     await repo.SaveChangesAsync(ct);
                     // Metin + görsel hazırsa bekletmeden yayına gönder (tekil onayla aynı kural).
                     if (item.MediaStatus == MediaStatus.Ready && item.Revisions.Any(rv => rv.IsCurrent)
-                        && (await gen.PublishExistingAsync(id, adGate: false, ct)).IsSuccess)
+                        && (await gen.PublishExistingAsync(id, adGate: false, CancellationToken.None)).IsSuccess)
                         publishedNow++;
                 }
             }
@@ -239,7 +246,7 @@ internal static class EditorialEndpoints
         // Gövde opsiyonel: {style: 0..19} şablon seçer; gövdesiz/boş = RASTGELE şablon.
         g.MapPost("/{id:guid}/preview-video", async (Guid id, PreviewVideoRequest? req, ContentGenerationService gen, CancellationToken ct) =>
         {
-            var r = await gen.GeneratePreviewVideoAsync(id, req?.Style, ct);
+            var r = await gen.GeneratePreviewVideoAsync(id, req?.Style, req?.AiBackground ?? false, ct);
             return r.IsSuccess ? Results.Ok(new { url = r.Value }) : Results.BadRequest(r.Error);
         });
 
@@ -264,13 +271,15 @@ internal static class EditorialEndpoints
         i.Revisions.FirstOrDefault(r => r.IsCurrent)?.Title ?? i.RawTitle;
 
     private static ContentSummaryDto Summary(ContentItem i) => new(
-        i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, CurrentTitle(i), i.CreatedAt);
+        i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, CurrentTitle(i), i.CategoryId, i.TestMode, i.CreatedAt);
 
     private static ContentDetailDto Detail(ContentItem i)
     {
         var rev = i.Revisions.FirstOrDefault(r => r.IsCurrent);
-        var media = i.Media.LastOrDefault(m => m.Kind != Domain.MediaKind.Video); // görsel (video hariç)
-        var video = i.Media.LastOrDefault(m => m.Kind == Domain.MediaKind.Video); // Reels/Shorts videosu
+        // ÜRETİM ZAMANINA göre en yenisi — EF koleksiyon sırası rastgele; sona eklenen AI görseli
+        // listede önde kalıp önizlemede/yayında ESKİ SkiaCard görünüyordu.
+        var media = i.Media.Where(m => m.Kind != Domain.MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault();
+        var video = i.Media.Where(m => m.Kind == Domain.MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault();
         return new ContentDetailDto(
             i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, i.ImageSource, i.TestMode, i.CategoryId,
             rev?.Title ?? i.RawTitle, rev?.ShortX, rev?.BodyHtml, rev?.InstagramCaption,

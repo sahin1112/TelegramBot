@@ -51,7 +51,7 @@ internal sealed class SlideVideoRenderer(
         new("Petrol",   new(0x06,0x0E,0x0E), new(0x0B,0x17,0x17), new(0x2E,0x9E,0x9E), new(0x5C,0xD0,0xC4), new(0xC2,0xDA,0xDA), 0),
     };
 
-    public async Task<byte[]> RenderSlidesVideoAsync(string title, string text, byte[]? musicBytes, int? style, string? category, CancellationToken ct)
+    public async Task<byte[]> RenderSlidesVideoAsync(string title, string text, byte[]? musicBytes, int? style, string? category, byte[]? backgroundImage, CancellationToken ct)
     {
         var o = mediaOptions.Value;
         int w = o.VideoWidth > 0 ? o.VideoWidth : 1080;
@@ -62,15 +62,32 @@ internal sealed class SlideVideoRenderer(
         var s = style is { } si && si >= 0 && si < Styles.Length ? Styles[si] : Styles[Random.Shared.Next(Styles.Length)];
         logger.LogInformation("Video şablonu: {Name}", s.Name);
 
+        // AI arka plan görseli (opsiyonel): bir kez çözülür, tüm sayfalarda cover-crop kullanılır.
+        using var bgImage = backgroundImage is { Length: > 0 } ? SKImage.FromEncodedData(backgroundImage) : null;
+        if (backgroundImage is { Length: > 0 } && bgImage is null)
+            logger.LogWarning("Video arka plan görseli çözülemedi — şablon zeminiyle devam ediliyor.");
+
         var parts = SplitSlides(text);
         var dir = Path.Combine(Path.GetTempPath(), "cp-video-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {
+            // ÇOK SAYFALI videoda sayfa süresi köşedeki ERİYEN PASTA ile hissettirilir: sayfa tek
+            // durağan kare yerine 0.5 sn'lik adımlarla çizilir, pasta her adımda biraz azalır.
+            // Tek sayfalık videoda pasta yok (gerek yok) → tek kare, eski davranış.
+            var frames = new List<(string File, double Secs)>();
+            var fi = 0;
             for (var i = 0; i < parts.Count; i++)
             {
-                var png = DrawSlide(title, parts[i], i, parts.Count, w, h, s, category);
-                await File.WriteAllBytesAsync(Path.Combine(dir, $"s{i}.png"), png, ct);
+                var steps = parts.Count > 1 ? Math.Max(1, secs * 2) : 1;
+                for (var k = 0; k < steps; k++)
+                {
+                    var remaining = parts.Count > 1 ? 1f - (k + 0.5f) / steps : -1f;
+                    var png = DrawSlide(title, parts[i], i, parts.Count, w, h, s, category, bgImage, remaining);
+                    var file = Path.Combine(dir, $"f{fi++}.png");
+                    await File.WriteAllBytesAsync(file, png, ct);
+                    frames.Add((file, (double)secs / steps));
+                }
             }
             string? musicPath = null;
             if (musicBytes is { Length: > 0 })
@@ -79,7 +96,7 @@ internal sealed class SlideVideoRenderer(
                 await File.WriteAllBytesAsync(musicPath, musicBytes, ct);
             }
             var outPath = Path.Combine(dir, "out.mp4");
-            await RunFfmpegAsync(dir, parts.Count, secs, outPath, musicPath, ct);
+            await RunFfmpegAsync(frames, outPath, musicPath, ct);
             return await File.ReadAllBytesAsync(outPath, ct);
         }
         finally
@@ -163,13 +180,31 @@ internal sealed class SlideVideoRenderer(
     }
 
     // ---------- tek slayt (1080x1920) ----------
-    private byte[] DrawSlide(string title, string part, int index, int total, int w, int h, VideoStyle st, string? category)
+    private byte[] DrawSlide(string title, string part, int index, int total, int w, int h, VideoStyle st, string? category, SKImage? bgImage, float remaining)
     {
         var s = w / 1080f;
         var (Accent, Accent2, TitleC) = (st.Accent, st.Accent2, st.TitleC);
         using var surface = SKSurface.Create(new SKImageInfo(w, h));
         var canvas = surface.Canvas;
 
+        if (bgImage is not null)
+        {
+            // AI ARKA PLAN: cover-crop + sayfadan sayfaya hafif zoom (monotonluğu kırar; sayfa içinde sabit).
+            var zoom = 1f + 0.045f * index;
+            var scale = Math.Max((float)w / bgImage.Width, (float)h / bgImage.Height) * zoom;
+            var dw = bgImage.Width * scale; var dh = bgImage.Height * scale;
+            var dst = new SKRect((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f);
+            using (var bp = new SKPaint { IsAntialias = true })
+                canvas.DrawImage(bgImage, dst, new SKSamplingOptions(SKCubicResampler.Mitchell), bp);
+            // SCRIM: yazı okunabilirliği için koyu katman — üst (rozetler) ve alt (metin/altbilgi) daha koyu.
+            using var scrim = new SKPaint { IsAntialias = true };
+            scrim.Shader = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(0, h),
+                new[] { new SKColor(0, 0, 0, 0xB4), new SKColor(0, 0, 0, 0x82), new SKColor(0, 0, 0, 0xC6) },
+                new[] { 0f, 0.42f, 1f }, SKShaderTileMode.Clamp);
+            canvas.DrawRect(SKRect.Create(0, 0, w, h), scrim);
+        }
+        else
+        {
         // Zemin
         using (var bg = new SKPaint { IsAntialias = true })
         {
@@ -177,7 +212,7 @@ internal sealed class SlideVideoRenderer(
                 new[] { st.Bg1, st.Bg2, st.Bg1 }, new[] { 0f, 0.5f, 1f }, SKShaderTileMode.Clamp);
             canvas.DrawRect(SKRect.Create(0, 0, w, h), bg);
         }
-        // Dekor (şablona göre) — hepsi hafif, metni ezmez
+        // Dekor (şablona göre) — hepsi hafif, metni ezmez (AI arka planda dekor çizilmez)
         switch (st.Deco)
         {
             case 0: // radyal ışıma
@@ -221,6 +256,7 @@ internal sealed class SlideVideoRenderer(
                 }
                 break;
         }
+        } // else (şablon zemini) sonu
         // Üst aksan çizgisi
         using (var bar = new SKPaint { IsAntialias = true })
         {
@@ -266,6 +302,26 @@ internal sealed class SlideVideoRenderer(
             }
             using var cp = new SKPaint { IsAntialias = true, Color = new SKColor(0xFF, 0xFF, 0xFF, 0xF2) };
             canvas.DrawText(cat, rect.Left + padX, rect.MidY + cf.Size * 0.36f, cf, cp);
+        }
+
+        // ERİYEN PASTA (sayfa süresi göstergesi): çok sayfalı videoda sağ üstte, küçük.
+        // remaining 1→0 eridikçe kalan dilim azalır; izleyici sayfanın biteceğini hisseder.
+        if (remaining >= 0f && total > 1)
+        {
+            var pr = 34f * s;
+            var pcx = w - margin - pr; var pcy = 120f * s + 36f * s;
+            using (var pring = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 5f * s, Color = MutedC.WithAlpha(0x55) })
+                canvas.DrawCircle(pcx, pcy, pr, pring);
+            var sweep = Math.Min(359.5f, 360f * remaining);
+            if (sweep > 0.5f)
+            {
+                using var pie = new SKPaint { IsAntialias = true, Color = Accent.WithAlpha(0xCC) };
+                using var ppath = new SKPath();
+                ppath.MoveTo(pcx, pcy);
+                ppath.ArcTo(new SKRect(pcx - pr + 5f * s, pcy - pr + 5f * s, pcx + pr - 5f * s, pcy + pr - 5f * s), -90f, sweep, false);
+                ppath.Close();
+                canvas.DrawPath(ppath, pie);
+            }
         }
 
         // Başlık (bağlam — her sayfada, küçük)
@@ -340,25 +396,26 @@ internal sealed class SlideVideoRenderer(
     }
 
     // ---------- ffmpeg (test edilmiş komut) ----------
-    private async Task RunFfmpegAsync(string dir, int slides, int secs, string outPath, string? musicPath, CancellationToken ct)
+    private async Task RunFfmpegAsync(List<(string File, double Secs)> frames, string outPath, string? musicPath, CancellationToken ct)
     {
         var ffmpeg = string.IsNullOrWhiteSpace(mediaOptions.Value.FfmpegPath) ? "ffmpeg" : mediaOptions.Value.FfmpegPath;
-        var inputs = string.Concat(Enumerable.Range(0, slides)
-            .Select(i => $"-loop 1 -t {secs} -i \"{Path.Combine(dir, $"s{i}.png")}\" "));
-        var streams = string.Concat(Enumerable.Range(0, slides).Select(i => $"[{i}:v]"));
-        var total = slides * secs;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var inputs = string.Concat(frames.Select(f => $"-loop 1 -t {f.Secs.ToString("0.###", ci)} -i \"{f.File}\" "));
+        var streams = string.Concat(Enumerable.Range(0, frames.Count).Select(i => $"[{i}:v]"));
+        var total = frames.Sum(f => f.Secs);
+        var totalS = total.ToString("0.###", ci);
         string args;
         if (musicPath is not null)
         {
             // MÜZİKLİ: ses videoya gömülür — toplam süreye kesilir, son 1.5 sn fade-out (komut test edildi).
-            var fadeStart = Math.Max(0, total - 1.5).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var fadeStart = Math.Max(0, total - 1.5).ToString("0.###", ci);
             args = $"-y -loglevel error {inputs}-i \"{musicPath}\" " +
-                   $"-filter_complex \"{streams}concat=n={slides}:v=1:a=0,fps=30,format=yuv420p[v];[{slides}:a]atrim=0:{total},afade=t=out:st={fadeStart}:d=1.5[a]\" " +
+                   $"-filter_complex \"{streams}concat=n={frames.Count}:v=1:a=0,fps=30,format=yuv420p[v];[{frames.Count}:a]atrim=0:{totalS},afade=t=out:st={fadeStart}:d=1.5[a]\" " +
                    $"-map \"[v]\" -map \"[a]\" -c:v libx264 -preset veryfast -c:a aac -b:a 128k -movflags +faststart \"{outPath}\"";
         }
         else
         {
-            args = $"-y -loglevel error {inputs}-filter_complex \"{streams}concat=n={slides}:v=1:a=0,fps=30,format=yuv420p\" -c:v libx264 -preset veryfast -movflags +faststart \"{outPath}\"";
+            args = $"-y -loglevel error {inputs}-filter_complex \"{streams}concat=n={frames.Count}:v=1:a=0,fps=30,format=yuv420p\" -c:v libx264 -preset veryfast -movflags +faststart \"{outPath}\"";
         }
 
         var psi = new ProcessStartInfo(ffmpeg, args)

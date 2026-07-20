@@ -53,7 +53,7 @@ public sealed class LogFeedReader
             Array.Sort(files, StringComparer.OrdinalIgnoreCase);
 
             // En yeni 2 dosya (gece yarısı devri penceresi için yeter)
-            foreach (var path in files.Reverse().Take(2))
+            foreach (var path in Enumerable.Reverse(files).Take(2)) // LINQ açık çağrı: C# 14 span dönüşümü array.Reverse()i void MemoryExtensions.Reverse(Span)a bağlıyor
                 ReadFileTail(path, source, since, minLevelRank, search, all);
         }
 

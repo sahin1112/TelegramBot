@@ -290,13 +290,13 @@ internal sealed class XPublisher(
         return null;
     }
 
-    /// <summary>280 sınırı: metin + link (t.co ile 23 sayılır) + sığarsa hashtag'ler.</summary>
+    /// <summary>280 sınırı: metin + sığarsa hashtag'ler. DIŞ LİNK EKLENMEZ — X, link içeren
+    /// gönderileri algoritmik olarak öne çıkarmıyor (erişimi düşürüyor); haber ayrıntısı bloga
+    /// profil linkinden/başka kanallardan ulaşır. (r.Link bilerek kullanılmıyor.)</summary>
     internal static string BuildText(PublishRequest r)
     {
         var text = !string.IsNullOrWhiteSpace(r.Text) ? r.Text : (r.Title ?? "");
-        var link = IsPublicHttpUrl(r.Link) ? r.Link! : null;
-        const int LinkCost = 25; // "\n\n" + t.co(23)
-        var budget = 280 - (link is null ? 0 : LinkCost);
+        const int budget = 280;
 
         if (text.Length > budget) text = text[..Math.Max(0, budget - 1)].TrimEnd() + "…";
         var tags = "";
@@ -307,7 +307,7 @@ internal sealed class XPublisher(
         }
         var result = text + (tags.Length > 0 ? "\n" + tags.Trim() : "");
         if (result.Length > budget) result = result[..budget];
-        return link is null ? result : result + "\n\n" + link;
+        return result;
     }
 
     private static string GuessType(string url) =>

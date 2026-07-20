@@ -22,6 +22,10 @@ a{color:var(--accent)}
 .nav a:hover{background:var(--panel2);color:var(--text)}
 .nav a.active{background:linear-gradient(90deg,rgba(46,197,182,.18),transparent);color:#fff;box-shadow:inset 2px 0 0 var(--accent)}
 .nav .ic{width:18px;text-align:center;opacity:.9}
+/* İçerikler altındaki kategori alt başlıkları */
+.nav a.sub-cat{padding:7px 12px 7px 34px;font-size:13px;margin-bottom:1px}
+.nav a.sub-cat .ic{width:12px;font-size:10px;opacity:.6}
+.nav a.sub-cat .off{opacity:.55;font-size:11px}
 /* Main */
 .main{padding:22px 26px;max-width:1200px}
 .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
@@ -132,6 +136,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
       <a href="#dashboard"><span class="ic">▚</span> Panel</a>
       <a href="#queue"><span class="ic">☑</span> Onay Kuyruğu</a>
       <a href="#content"><span class="ic">▤</span> İçerikler</a>
+      <div id="nav-cats"></div>
       <a href="#add"><span class="ic">✎</span> İçerik Ekle</a>
       <a href="#categories"><span class="ic">▦</span> Kategoriler</a>
       <a href="#scheduled"><span class="ic">⏰</span> Planlanmış</a>
@@ -212,14 +217,28 @@ async function cats(force){ if(force) _cats=null; if(!_cats) _cats=await api('/c
 function catSelect(id, list, sel){ return `<select id="${id}"><option value="">— kategori yok —</option>${list.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${h(c.name)}${c.isActive?'':' (kapalı)'}</option>`).join('')}</select>`; }
 function catName(list,id){ const c=list.find(x=>x.id===id); return c?c.name:'—'; }
 const VIEW_STATE={}; // sayfalı ekranların sayfa/filtre durumu: kaydet→route sonrası korunur, menüden geçişte sıfırlanır
+/* İçerikler alt menüsü: her kategori kendi izole görünümüne link olur (#content/<id>), + Kategorisiz. */
+async function renderNavCats(){
+  const el=$('#nav-cats'); if(!el) return;
+  const list=await cats().catch(()=>[]);
+  el.innerHTML=list.map(c=>`<a class="sub-cat" href="#content/${c.id}"><span class="ic">›</span> ${h(c.name)}${c.isActive?'':' <span class="off">(kapalı)</span>'}</a>`).join('')
+    +`<a class="sub-cat" href="#content/none"><span class="ic">›</span> Kategorisiz</a>`;
+  markNav();
+}
+function markNav(){
+  const hash=(location.hash.replace('#','')||'dashboard');
+  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+hash));
+}
 async function route(){
-  const key=(location.hash.replace('#','')||'dashboard');
-  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+key));
+  const hash=(location.hash.replace('#','')||'dashboard');
+  const [key,arg]=hash.split('/');
+  markNav();
   const fn=routes[key]||renderDashboard;
   // Eski ekranın #view üzerindeki delege dinleyicilerini temizle (birikip çift tetiklemeyi önler)
   const old=$('#view'); const fresh=old.cloneNode(false); old.parentNode.replaceChild(fresh,old);
   fresh.innerHTML='<div class="empty">Yükleniyor…</div>';
-  try{ await fn(); }catch(e){ $('#view').innerHTML=`<div class="card empty">Hata: ${h(e.message)}</div>`; }
+  try{ await fn(arg); }catch(e){ $('#view').innerHTML=`<div class="card empty">Hata: ${h(e.message)}</div>`; }
+  renderNavCats().catch(()=>{}); // kategori alt menüsünü güncel tut (kategori ekle/kapat sonrası dahil)
 }
 window.addEventListener('hashchange',()=>{ for(const k in VIEW_STATE) delete VIEW_STATE[k]; route(); });
 
@@ -313,14 +332,18 @@ async function renderQueue(){
 }
 
 /* ---------------- İçerikler ---------------- */
-async function renderContent(){
-  // 3 sekme: her biri SUNUCU TARAFI sayfalı (durum + arama + sayfa parametreleriyle /editorial).
+async function renderContent(cat){
+  // Kategori izolasyonu: cat boş → Tümü; 'none' → kategorisiz; guid → yalnız o kategori (sol menüden gelir).
+  // 4 sekme: her biri SUNUCU TARAFI sayfalı (durum + arama + kategori + sayfa parametreleriyle /editorial).
+  const cl=await cats().catch(()=>[]);
+  const curCat=cat&&cat!=='none'?cl.find(c=>c.id===cat):null;
+  const title=cat?('İçerikler — '+(cat==='none'?'Kategorisiz':(curCat?curCat.name:'?'))):'İçerikler — Tümü';
   const TABS=[['Published','Yayınlananlar'],['Approved','Onaylı (işlemde)'],['PendingReview','Onaya gidenler'],['Draft','Taslak']];
   const S=VIEW_STATE.content||(VIEW_STATE.content={page:1,q:'',status:'Published'});
   if(!TABS.some(t=>t[0]===S.status)) S.status='Published';
   const tabsHtml=`<div class="row" id="ctabs" style="gap:6px">${TABS.map(t=>`<button class="btn sm${S.status===t[0]?' pri':''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>`
     + `<div class="row" style="margin-top:8px"><input id="cq" type="text" placeholder="Başlıkta ara…" style="width:220px"></div>`;
-  $('#view').innerHTML = head('İçerikler','Sekmeye göre listelenir; başlıkta ara, satıra tıkla → düzenle / önizle / yayınla', tabsHtml);
+  $('#view').innerHTML = head(title, cat?'Bu görünümde yalnız bu kategorinin içerikleri listelenir; öteki kategorilerle karışmaz':'Tüm kategorilerin içerikleri; soldaki alt başlıklardan tek kategoriye odaklan', tabsHtml);
   const box=document.createElement('div'); box.className='card'; box.id='clist'; $('#view').appendChild(box);
   $('#cq').value=S.q;
   const SIZE=25; let page=S.page;
@@ -328,7 +351,7 @@ async function renderContent(){
     const st=S.status, q=$('#cq').value.trim();
     S.page=page; S.q=q;
     const [r, sched]=await Promise.all([
-      api(`/editorial?size=${SIZE}&page=${page}&status=${st}${st==='Draft'?'&asc=true':''}${q?`&q=${encodeURIComponent(q)}`:''}`),
+      api(`/editorial?size=${SIZE}&page=${page}&status=${st}${st==='Draft'?'&asc=true':''}${cat?`&category=${encodeURIComponent(cat)}`:''}${q?`&q=${encodeURIComponent(q)}`:''}`),
       api('/publishing/scheduled').catch(()=>[])
     ]);
     // içerik → en yakın planlı yayın zamanı (panelde "ne zaman yayınlanacak?" hep görünsün)
@@ -339,8 +362,10 @@ async function renderContent(){
       if(i.editorialStatus==='Approved'&&i.mediaStatus==='Pending') return '<span class="muted" style="font-size:11px">üretim sırasında</span>';
       if(i.editorialStatus==='Approved'&&i.mediaStatus==='AwaitingManualUpload') return '<span class="muted" style="font-size:11px">görsel bekliyor</span>';
       return ''; };
-    box.innerHTML = `<table><thead><tr><th>Başlık</th><th style="width:130px">Durum</th><th style="width:120px">Yayın planı</th><th style="width:90px">Risk</th><th style="width:130px">Medya</th><th style="width:70px">Mod</th><th style="width:150px">Tarih</th></tr></thead><tbody>${
-      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td><td>${statusChip(i.editorialStatus)}</td><td>${planCell(i)}</td><td>${riskBadge(i.riskLevel)}</td><td class="muted">${h(mediaLabel(i.mediaStatus))}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||'<tr><td colspan=7 class="empty">Kayıt yok.</td></tr>'
+    // "Tümü" görünümünde içerik hangi kategorideyse görünsün (tek kategori görünümünde kolon gereksiz).
+    const catCol=!cat;
+    box.innerHTML = `<table><thead><tr><th>Başlık</th>${catCol?'<th style="width:110px">Kategori</th>':''}<th style="width:130px">Durum</th><th style="width:120px">Yayın planı</th><th style="width:90px">Risk</th><th style="width:130px">Medya</th><th style="width:70px">Mod</th><th style="width:150px">Tarih</th></tr></thead><tbody>${
+      r.items.map(i=>`<tr data-id="${i.id}" style="cursor:pointer"><td>${h(i.title||'(başlıksız)')}</td>${catCol?`<td class="muted">${i.categoryId?h(catName(cl,i.categoryId)):'—'}</td>`:''}<td>${statusChip(i.editorialStatus)}</td><td>${planCell(i)}</td><td>${riskBadge(i.riskLevel)}</td><td class="muted">${h(mediaLabel(i.mediaStatus))}</td><td>${i.testMode?'<span class=\"chip test\">TEST</span>':''}</td><td class="muted">${new Date(i.createdAt).toLocaleString('tr')}</td></tr>`).join('')||`<tr><td colspan=${catCol?8:7} class="empty">Kayıt yok.</td></tr>`
     }</tbody></table>${pagerBar(r.total,r.page,r.size)}`;
     box.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>showDetail(tr.dataset.id).catch(e=>toast(e.message,true)));
   }
@@ -406,6 +431,7 @@ async function showDetail(id){
             <button class="btn pri sm" id="e-imggen">Görseli üret</button>
             <select id="e-vidstyle" style="width:auto" title="Video şablonu (hepsi koyu; renk/dekor değişir)"><option value="">🎬 Rastgele şablon</option>${['Turuncu','Kızıl','Altın','Zümrüt','Turkuaz','Okyanus','İndigo','Mor','Magenta','Pembe','Lime','Buz','Bakır','Çelik','Gece Moru','Neon Yeşil','Cyan','Amber','Bordo','Petrol'].map((n,i)=>`<option value="${i}">${i+1}. ${n}</option>`).join('')}</select>
             <button class="btn sm" id="e-vidgen" title="Reels/Shorts/TikTok için 1080×1920 dikey; sayfa sayısı metne göre (7 sn/sayfa)">🎬 Video oluştur</button>
+            <button class="btn sm" id="e-vidgen-ai" title="Arka plan şablon yerine habere uygun AI görseli olur (1 görsel maliyeti eklenir); metinler görselin üstüne basılır">✨ AI görselli video</button>
           </div>
         </div>
         <div id="e-imgupload" class="row" style="display:none;margin-top:8px"><input type="file" id="e-imgfile" accept="image/*"><button class="btn sm" id="e-imgup">Yükle</button></div>
@@ -479,12 +505,15 @@ async function showDetail(id){
     imgSrc.value=d.imageSource||'SkiaCard';
     const syncImg=()=>{ const v=imgSrc.value; const man=v==='Manual'; $('#e-imgupload').style.display=man?'flex':'none'; $('#e-imggen').style.display=man?'none':'inline-block'; const cs=$('#e-cardstyle'); if(cs) cs.style.display=(v==='SkiaCard')?'inline-block':'none'; };
     imgSrc.onchange=syncImg; syncImg();
-    $('#e-vidgen').onclick=async()=>{ const b=$('#e-vidgen'); b.disabled=true; b.textContent='🎬 Üretiliyor… (~15 sn)';
+    const genVideo=async(b,ai)=>{ const old=b.textContent; b.disabled=true; b.textContent=ai?'✨ AI görsel + video… (~30 sn)':'🎬 Üretiliyor… (~15 sn)';
       const vs=$('#e-vidstyle'); const style=(vs&&vs.value!=='')?parseInt(vs.value,10):null;
-      try{ const r=await api(`/editorial/${id}/preview-video`,{method:'POST',body:{style}});
-        $('#e-vidprev').innerHTML=`<video src="${h(r.url)}" controls playsinline style="max-height:360px;border-radius:10px;display:block"></video><div class="muted" style="font-size:11px;margin-top:4px">🎬 Reels/Shorts videosu hazır (1080×1920 · 21 sn). IG/YouTube/TikTok paylaşımında video varsa VİDEO, yoksa görsel gönderilir.</div>`;
-        toast('Video üretildi — önizlemeden izleyebilirsin'); b.disabled=false; b.textContent='🎬 Video oluştur'; }
-      catch(e){ toast(e.message,true); b.disabled=false; b.textContent='🎬 Video oluştur'; } };
+      try{ const r=await api(`/editorial/${id}/preview-video`,{method:'POST',body:{style,aiBackground:ai}});
+        $('#e-vidprev').innerHTML=`<video src="${h(r.url)}" controls playsinline style="max-height:360px;border-radius:10px;display:block"></video><div class="muted" style="font-size:11px;margin-top:4px">🎬 Reels/Shorts videosu hazır (1080×1920). IG/YouTube/TikTok paylaşımında video varsa VİDEO, yoksa görsel gönderilir.</div>`;
+        toast('Video üretildi — önizlemeden izleyebilirsin'); }
+      catch(e){ toast(e.message,true); }
+      finally{ b.disabled=false; b.textContent=old; } };
+    $('#e-vidgen').onclick=()=>genVideo($('#e-vidgen'),false);
+    $('#e-vidgen-ai').onclick=()=>genVideo($('#e-vidgen-ai'),true);
     $('#e-imggen').onclick=async()=>{ const b=$('#e-imggen'); b.disabled=true; b.textContent='Üretiliyor…';
       const cs=$('#e-cardstyle'); const cardStyle=(imgSrc.value==='SkiaCard'&&cs&&cs.value!=='')?parseInt(cs.value,10):null;
       try{ await api(`/editorial/${id}/preview-image`,{method:'POST',body:{imageSource:imgSrc.value,cardStyle}}); toast('Görsel üretildi'); showDetail(id); }
@@ -545,13 +574,13 @@ async function renderAdd(){
   $('#a-save').onclick=async()=>{
     try{ await api('/editorial/manual',{method:'POST',body:{title:$('#a-title').value,rawInput:$('#a-raw').value,
       categoryId:$('#a-cat').value||null,imageSource:$('#a-img').value,testMode:$('#a-test').checked,
-      scheduledAt:$('#a-when').value?new Date($('#a-when').value).toISOString():null}}); toast('Eklendi, AI üretimi sıraya alındı'); location.hash='#content'; }catch(e){toast(e.message,true);}
+      scheduledAt:$('#a-when').value?new Date($('#a-when').value).toISOString():null}}); toast('Eklendi, AI üretimi sıraya alındı'); location.hash=$('#a-cat').value?('#content/'+$('#a-cat').value):'#content'; }catch(e){toast(e.message,true);}
   };
   $('#n-save').onclick=async()=>{
     try{ await api('/editorial/manual-no-ai',{method:'POST',body:{title:$('#n-title').value,shortX:$('#n-short').value,
       bodyHtml:$('#n-body').value,instagramCaption:$('#n-ig').value||null,tags:$('#n-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
       primaryKeyword:null,imageAltText:null,categoryId:$('#n-cat').value||null,imageSource:$('#n-img').value,testMode:$('#n-test').checked,
-      scheduledAt:$('#n-when').value?new Date($('#n-when').value).toISOString():null}}); toast('Eklendi'); location.hash='#content'; }catch(e){toast(e.message,true);}
+      scheduledAt:$('#n-when').value?new Date($('#n-when').value).toISOString():null}}); toast('Eklendi'); location.hash=$('#n-cat').value?('#content/'+$('#n-cat').value):'#content'; }catch(e){toast(e.message,true);}
   };
 }
 function imgAndOpts(p){ return `<div class="grid k2"><div><label>Görsel kaynağı</label><select id="${p}-img">

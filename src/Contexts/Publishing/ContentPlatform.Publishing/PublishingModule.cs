@@ -39,6 +39,9 @@ public sealed class PublishingModule : IModule
         // varsayılan 30 sn TOPLAM zaman aşımı yetersiz; ayrıca pahalı/yinelenemez bir çağrıyı otomatik
         // yeniden denemek çift ücretlendirir. Bu yüzden burada sade, uzun (3 dk) zaman aşımı kullanıyoruz.
         services.AddHttpClient(OpenAiTextProvider.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(3));
+        // Görsel üretimi AYRI istemci: gpt-image-1 (özellikle 'high' kalitede) 3 dakikayı aşabiliyor —
+        // metinle aynı istemciyi paylaşınca 180 sn'de "Timeout elapsed" kesiyordu.
+        services.AddHttpClient(Infrastructure.OpenAi.OpenAiImageProvider.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(8));
 
         // Meta (Instagram/Threads) gönderimi: video işleme beklemesi uzun sürebilir → sade, uzun zaman aşımı.
         services.AddHttpClient(Infrastructure.Meta.InstagramPublisher.HttpClientName, c => c.Timeout = TimeSpan.FromMinutes(2));

@@ -52,7 +52,16 @@ internal sealed class YoutubePublisher(
             using var tokenResp = await client.PostAsync("https://oauth2.googleapis.com/token", tokenForm, ct);
             var tokenJson = await tokenResp.Content.ReadAsStringAsync(ct);
             if (!tokenResp.IsSuccessStatusCode)
+            {
+                // invalid_grant = refresh token ÖLMÜŞ. En sık neden: Google Cloud'da OAuth consent
+                // screen "Testing" modunda → token 7 günde otomatik iptal. Kalıcı çözüm: uygulamayı
+                // "In production"a al, sonra kanalı panelden BİR KEZ yeniden bağla.
+                if (tokenJson.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase))
+                    return Fail("YouTube bağlantısı düşmüş (invalid_grant — refresh token iptal olmuş). " +
+                        "Google Cloud'da OAuth uygulaması 'Testing' modundaysa token 7 günde ölür: uygulamayı 'In production' yapın " +
+                        "ve kanalı panelden yeniden bağlayın.");
                 return Fail("YouTube token yenileme hatası: " + Trim(tokenJson));
+            }
             string? accessToken;
             using (var doc = JsonDocument.Parse(tokenJson))
                 accessToken = doc.RootElement.TryGetProperty("access_token", out var at) ? at.GetString() : null;
@@ -93,7 +102,14 @@ internal sealed class YoutubePublisher(
             using var resp = await client.SendAsync(req, ct);
             var json = await resp.Content.ReadAsStringAsync(ct);
             if (!resp.IsSuccessStatusCode)
+            {
+                // quotaExceeded: videos.insert 1600 birim/upload; varsayılan günlük kota 10.000 → ~6 video/gün.
+                if (json.Contains("quotaExceeded", StringComparison.OrdinalIgnoreCase) ||
+                    json.Contains("uploadLimitExceeded", StringComparison.OrdinalIgnoreCase))
+                    return Fail("YouTube günlük yükleme kotası/limiti doldu (her video 1600 birim; varsayılan kota ~6 video/gün). " +
+                        "Kota Pasifik gece yarısı sıfırlanır — kota artırımı isteyin ya da YouTube kadansını düşürün. Detay: " + ErrOf(json));
                 return Fail("YouTube yükleme hatası: " + ErrOf(json));
+            }
 
             string? videoId;
             using (var doc = JsonDocument.Parse(json))

@@ -41,8 +41,19 @@ internal sealed class ScheduledDispatchFallbackService(
                     // Sahiplenemedik → Worker (asıl gönderici) almış demektir; karışma.
                     if (!await publications.TryClaimScheduledAsync(pub.Id, stoppingToken)) continue;
                     claimed++;
-                    if (await distribution.PublishOneAsync(pub, stoppingToken)) ok++;
-                    await publications.SaveChangesAsync(stoppingToken);
+                    try
+                    {
+                        if (await distribution.PublishOneAsync(pub, stoppingToken)) ok++;
+                        await publications.SaveChangesAsync(stoppingToken);
+                    }
+                    catch (OperationCanceledException) { throw; } // kapanış: dış döngü ele alır (kayıt Pending kalırsa kurtarma işi toparlar)
+                    catch (Exception ex)
+                    {
+                        // Tek yayının hatası turu öldürmesin; sahiplenilen kayıt Pending'de takılmasın.
+                        logger.LogError(ex, "Yedek gönderici: planlı yayın gönderilemedi (id={Id}); 1 dk sonraya yeniden planlandı.", pub.Id);
+                        try { pub.Reschedule(clock.UtcNow.AddMinutes(1), clock); await publications.SaveChangesAsync(CancellationToken.None); }
+                        catch (Exception ex2) { logger.LogError(ex2, "Yedek gönderici: kurtarma kaydı başarısız (id={Id}).", pub.Id); }
+                    }
                 }
 
                 if (claimed > 0)

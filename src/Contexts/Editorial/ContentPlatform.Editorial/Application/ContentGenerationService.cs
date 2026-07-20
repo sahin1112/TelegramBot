@@ -42,11 +42,17 @@ public sealed class ContentGenerationService(
         "Sen SEO odakli bir HABER/icerik editorusun. Kaynak metni Turkce, ozgun, telifsiz ve ARAMA MOTORU DOSTU sekilde AKTAR; kaynakta olmayan isim/veri/bilgi UYDURMA. " +
         "DIL (COK ONEMLI): Kaynak hangi dilde olursa olsun (Ingilizce dahil) TUM CIKTIYI TURKCE uret. " +
         "ATIF / SADAKAT (COK ONEMLI, HER SENARYO): Kaynaktaki KIM-NE-NEREDE bilgisini KORU. Bir gorus/iddia kaynakta bir kisiye veya kuruma atfedilmisse (ornek: 'X, Y kurumu CEO'su'), icerikte de MUTLAKA o kisi/kuruma atfet; 'uzmanlar/yetkililer' gibi BELIRSIZ ifadeye cevirme ve sitenin kendi gorusuymus gibi SUNMA. Kaynakta acik bir kisi/kurum atfi YOKSA, atif UYDURMA (hayali 'uzman/yetkili' yazma); olayi tarafsiz haber diliyle, YALNIZCA kaynaktaki bilgiyle sinirli aktar. Sen yorum yapmiyorsun, kaynagi aktariyorsun. Bu kurallar her tur icerik icin gecerlidir: haber, duyuru, analiz, gorus, rehber. " +
+        "OLGU CIKARIMI (COK ONEMLI): Yazmaya baslamadan once kaynaktaki TUM SOMUT OLGULARI cikar: sayilar, tutarlar, yuzdeler, tarihler, takvimler, adetler, kisi/kurum/yer adlari, plan/pilot ayrintilari, alinan kararlar. Bu olgularin MUMKUN OLDUGUNCA HEPSINI govdeye dogal bicimde YERLESTIR — somut olgu atlanmis haber EKSIK haberdir. Kaynak birden cok neden/katman/madde sayiyorsa (ornegin 'uc katmanli tehdit') HEPSINI tek tek acikca yaz, ozetleyip gecme. " +
+        "META CUMLE YASAK: 'kaynak metin belirtmiyor / aciklamiyor / bilgi verilmemis' gibi KAYNAGA GONDERME yapan cumleler ASLA YAZMA — okuyucu kaynagi bilmez, bu cumleler anlamsizdir. Bilgi kaynakta gercekten yoksa o konuyu HIC ACMA; varsa dogru ve eksiksiz aktar. Kaynakta OLAN bir bilgiye 'belirtilmemis' demek AGIR HATADIR. " +
+        "TEKRAR YASAK: Ayni fikri/cumleyi farkli kelimelerle TEKRARLAMA. Her paragraf YENI bir bilgi, ayrinti, boyut ya da baglam eklemeli; iki fikri on paragrafa YAYMA. Yazacak yeni bilgin bittiyse metni BITIR. " +
+        "UZUNLUK: Hedef 600-1000 kelime; AMA kaynaktaki bilgi bu uzunlugu doldurmuyorsa TEKRARLA SISIRME — kaynaktaki tum olgulari kullandiktan sonra dogal uzunlukta bitir. Dolu 400 kelime, tekrarli 800 kelimeden HER ZAMAN iyidir. " +
+        "TELIF/KURGU: Kaynagin cumlelerini birebir cevirme; paragraf sirasini ve kurgusunu IZLEME — olgulari onem sirasina gore KENDI kurgunla yeniden duzenle (ters piramit: en onemli olgu ve olay giriste). 7 kelimeyi asan birebir alinti KULLANMA. Bu kural LISTE/SIRALAMA cumleleri icin de gecerli: kaynak konu/ozellik siraliyorsa ogeleri AYNI SIRAYLA ve ayni kelime dizilimiyle aktarma — sirayi degistir, es anlamli ifadelerle yeniden kur, gerekirse listeyi boler farkli cumlelere dagit. (Fiyat, tarih, resmi kategori/urun adi gibi degistirilemez olgusal kaliplar bunun DISINDADIR — onlari aynen koru.) Kaynagin alt basligindaki tek fikri genisletmek yerine metnin TAMAMINDAKI olgulari isle. " +
+        "BASLIK-GOVDE UYUMU: Basligin vaat ettigi konu govdenin AGIRLIK MERKEZI olmali; baslikta A konusu deyip govdeyi B konusuna KAYDIRMA. " +
         "BASLIK: Kaynagin basligini AYNEN KULLANMA/birebir cevirme; ama kaynaktaki ASIL KONUYU yansit (gerekiyorsa kisi/kurum adi gecebilir). Turkce, ozgun, SOMUT, ilgi cekici, SEO uyumlu; ana anahtar kelimeyi icersin; ~50-65 karakter. Genel/klise baslik yazma. " +
         "shortX (X/Twitter): <=280 karakter, TEK BASINA anlasilir NET bir OZET olsun — kim + ne dedi/ne oldu acik (kisi/kurum + iddia). Belirsiz teaser DEGIL; tweet tek basina okununca olay anlasilmali. " +
         "instagramCaption: <=2200 karakter, TEK BASINA anlasilir akici bir ozet; kim/ne/neden acik; kaynaktaki atfi koru. " +
-        "GOVDE (bodyHtml): TURKCE, SEO uzunlugunda — EN AZ 600, mumkunse 700-1000 kelime. Kaynagin GERCEK konusuna odaklan; genel dolgu/klise ile sisirme. " +
-        "Yapilandir: en az 2-3 adet <h2> (gerekirse <h3>) alt baslik; her paragrafi <p>...</p> ile sar; paragraflar ARASINDA gercek cift satir sonu (\\n\\n) birak, tek paragrafta BIRLESTIRME. " +
+        "GOVDE (bodyHtml): TURKCE; uzunluk icin UZUNLUK kuralina uy (hedef 600-1000, ama tekrarla/dolguyla SISIRME). Kaynagin GERCEK konusuna odaklan; genel dolgu/klise yok; kaynaktaki somut olgularin tamamini kullan. " +
+        "Yapilandir: icerik YETERLIYSE 2-3 adet <h2> (gerekirse <h3>) alt baslik — alt basliklar FARKLI bilgi bolumlerini ayirmali; ince kaynakta ayni fikri bolup SAHTE alt baslik uretme (alt bassiz kisa haber de gecerli). Her paragrafi <p>...</p> ile sar; paragraflar ARASINDA gercek cift satir sonu (\\n\\n) birak, tek paragrafta BIRLESTIRME. " +
         "Ana anahtar kelimeyi (primaryKeyword) baslikta, ilk paragrafta ve alt basliklarda DOGAL kullan (asiri tekrar yok). Giris + alt baslikli govde + sonuc yapisi kur. " +
         "tags: 3-8 adet Turkce SEO etiketi. primaryKeyword: icerigin ana Turkce anahtar kelimesi. imageAltText: Turkce, anahtar kelimeli gorsel alt metni. " +
         "Cikti YALNIZCA su JSON: {\"title\":\"...\",\"shortX\":\"<=280 karakter\",\"bodyHtml\":\"uzun SEO makale HTML\"," +
@@ -174,7 +180,9 @@ public sealed class ContentGenerationService(
             var title = item.Revisions.FirstOrDefault(r => r.IsCurrent)?.Title ?? item.RawTitle ?? "Başlık";
             // SkiaCard için: seçili şablon varsa onu, yoksa RASTGELE (her basışta farklı tasarım). AI'da yok sayılır.
             var theme = cardStyle is { } cs ? cs.ToString() : System.Random.Shared.Next(0, 24).ToString();
-            var (url, kind, w, h) = await BuildImageAsync(source, title, theme, ct);
+            // Panelden AI seçildiyse SESSİZCE SkiaCard'a düşme: gerçek hata (anahtar/model/bakiye)
+            // toast'ta görünsün ki kullanıcı sorunu çözebilsin. Otomatik akıştaki fallback aynen durur.
+            var (url, kind, w, h) = await BuildImageAsync(source, title, theme, ct, aiStrict: source == ImageSource.Ai);
             item.AddMedia(kind, url, w, h, titleBurned: kind == MediaKind.SkiaCard, clock);
             item.MarkMediaReady(clock);
             await repository.SaveChangesAsync(ct);
@@ -245,6 +253,13 @@ public sealed class ContentGenerationService(
     }
 
     /// <summary>AI görsel istemi: gerçekçi + dikkat çekici editoryal kapak; başlık tasarıma şık gömülür.</summary>
+    /// <summary>Video arka planı: YAZISIZ, dikey, üstüne açık renk metin basılınca okunaklı kalacak sade görsel.</summary>
+    private static string BuildVideoBackgroundPrompt(string title) =>
+        $"Konusu \"{title}\" olan bir haber icin DIKEY (9:16) Reels/Shorts video ARKA PLAN gorseli uret. " +
+        "UZERINDE HICBIR YAZI, HARF, RAKAM veya LOGO OLMASIN — metin sonradan ustune basilacak. " +
+        "Foto-gercekci ya da sinematik dijital sanat; atmosferik, koyu tonlarin agir bastigi, sade ve derinlikli bir kompozisyon; " +
+        "merkez bolge gorece sakin kalsin ki ustune basilacak acik renk yazi OKUNAKLI olsun; asiri karmasik/detayli olmasin.";
+
     private static string BuildAiImagePrompt(string title) =>
         $"Konusu \"{title}\" olan bir haber/blog yazisi icin GERCEKCI, YUKSEK KALITE, dikkat cekici bir KAPAK gorseli uret. " +
         "Tarz: foto-gercekci ya da sinematik premium dijital sanat; DUZ/BASIT/KLISE VEKTOR veya kroki cizim DEGIL. " +
@@ -252,7 +267,10 @@ public sealed class ContentGenerationService(
         $"Gorselin uzerine, tasarima SIK bir sekilde entegre, BUYUK ve OKUNAKLI modern bir tipografiyle su baslik DOGRU sekilde yazilsin: \"{title}\". " +
         "Baslik net, hatasiz, gorsel hiyerarside one cikan bir manset gibi olsun; okunabilirlik icin gerekli yerde hafif koyu zemin/gradyan kullan.";
 
-    private async Task<(string Url, MediaKind Kind, int W, int H)> BuildImageAsync(ImageSource source, string title, string? cardTheme, CancellationToken ct)
+    /// <summary>aiStrict=true (panel önizlemesi): AI başarısızsa SkiaCard'a DÜŞMEZ, hata fırlatır —
+    /// kullanıcı bilinçli AI seçtiyse gerçek sebebi (anahtar/model erişimi/bakiye) görmelidir.
+    /// aiStrict=false (otomatik hat): eski davranış — görselsiz makale kalmasın diye SkiaCard'a düşer.</summary>
+    private async Task<(string Url, MediaKind Kind, int W, int H)> BuildImageAsync(ImageSource source, string title, string? cardTheme, CancellationToken ct, bool aiStrict = false)
     {
         var (cardW, cardH) = CardSize();
         if (source == ImageSource.Ai)
@@ -260,15 +278,25 @@ public sealed class ContentGenerationService(
             var (aiW, aiH) = AiImageSize(cardW, cardH);
             try
             {
+                // Varsayılan kalite "medium": "high" 2-3+ dk sürüp istemci zaman aşımına takılabiliyor;
+                // medium ~30-60 sn ve kalite farkı küçük. Panelden OpenAI:ImageQuality=high ile yükseltilebilir.
                 var img = await imageProvider.GenerateAsync(
-                    new ImageGenerationRequest(BuildAiImagePrompt(title), aiW, aiH, "high"), ct);
+                    new ImageGenerationRequest(BuildAiImagePrompt(title), aiW, aiH, "medium"), ct);
                 if (img.Bytes.Length > 0)
                 {
                     var aiUrl = await mediaStore.SaveAsync(img.Bytes, img.ContentType, ct);
                     return (aiUrl, MediaKind.AiImage, aiW, aiH);
                 }
+                if (aiStrict) throw new InvalidOperationException("AI görsel servisi boş görsel döndürdü.");
             }
-            catch (Exception ex) { logger.LogWarning(ex, "AI gorsel basarisiz, SkiaCard'a dusuluyor."); }
+            catch (Exception ex) when (!aiStrict)
+            {
+                logger.LogWarning(ex, "AI gorsel basarisiz, SkiaCard'a dusuluyor.");
+            }
+            catch (Exception ex) when (ex is not InvalidOperationException)
+            {
+                throw new InvalidOperationException("AI görsel üretilemedi: " + FriendlyAiError(ex), ex);
+            }
         }
 
         var card = cardRenderer.RenderTitleCard(title, cardTheme, cardW, cardH);
@@ -311,7 +339,7 @@ public sealed class ContentGenerationService(
     {
         if (item.UseAi)
         {
-            var q = qualityGate.Evaluate(f.Title, f.ShortX, f.BodyHtml, f.Tags.ToList());
+            var q = qualityGate.Evaluate(f.Title, f.ShortX, f.BodyHtml, f.Tags.ToList(), item.RawInput);
             if (q.Critical)
             {
                 var reason = string.Join(" ", q.Issues);
@@ -377,19 +405,21 @@ public sealed class ContentGenerationService(
         return Result.Success();
     }
 
-    /// <summary>Son GÖRSEL (video hariç) medya URL'i.</summary>
+    /// <summary>Son GÖRSEL (video hariç) medya URL'i — ÜRETİM ZAMANINA göre en yenisi.
+    /// (Listenin sırasına güvenilmez: EF koleksiyonu DB'den Guid anahtar sırasıyla, yani RASTGELE
+    /// yükler — SkiaCard'dan SONRA üretilen AI görseli listede önde kalıp seçilmeyebiliyordu.)</summary>
     private static string? LatestImageUrl(ContentItem item) =>
-        item.Media.LastOrDefault(m => m.Kind != MediaKind.Video)?.Url;
+        item.Media.Where(m => m.Kind != MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault()?.Url;
 
-    /// <summary>Son VİDEO medya URL'i (Reels/Shorts slayt videosu).</summary>
+    /// <summary>Son VİDEO medya URL'i (Reels/Shorts) — üretim zamanına göre en yenisi.</summary>
     private static string? LatestVideoUrl(ContentItem item) =>
-        item.Media.LastOrDefault(m => m.Kind == MediaKind.Video)?.Url;
+        item.Media.Where(m => m.Kind == MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault()?.Url;
 
     /// <summary>
     /// Reels/Shorts/TikTok için slayt videosu üretir (X metni → 3 sayfa × 7 sn = 21 sn, 1080x1920).
     /// YAYINLAMAZ — önizleme; yayında IG/YouTube/TikTok'a video varsa video gider, yoksa görsel.
     /// </summary>
-    public async Task<Result<string?>> GeneratePreviewVideoAsync(Guid contentItemId, int? style, CancellationToken ct)
+    public async Task<Result<string?>> GeneratePreviewVideoAsync(Guid contentItemId, int? style, bool aiBackground, CancellationToken ct)
     {
         var item = await repository.GetAsync(contentItemId, ct);
         if (item is null) return Result.Failure<string?>(Error.NotFound("İçerik"));
@@ -402,6 +432,19 @@ public sealed class ContentGenerationService(
 
         try
         {
+            // AI ARKA PLAN (opsiyonel, panelden "AI görselli video"): habere uygun DİKEY görsel üretilir,
+            // renderer bunu cover-crop edip üstüne koyu katman basar. Başarısızsa hata GÖSTERİLİR
+            // (sessizce şablona düşülmez — kullanıcı bilinçli AI seçti). Şablonlu üretim aynen ayrı yol.
+            byte[]? bgImage = null;
+            if (aiBackground)
+            {
+                var img = await imageProvider.GenerateAsync(
+                    new ImageGenerationRequest(BuildVideoBackgroundPrompt(title), 1024, 1536, "medium"), ct); // hız: bkz. BuildImageAsync notu
+                if (img.Bytes.Length == 0)
+                    return Result.Failure<string?>(Error.Conflict("AI arka plan görseli üretilemedi (boş yanıt)."));
+                bgImage = img.Bytes;
+            }
+
             // Arka plan müziği (panelden yüklenen mp3 — video.music_url). Yoksa sessiz video.
             byte[]? music = null;
             var musicUrl = await settingsProvider.GetAsync("video.music_url", ct);
@@ -413,7 +456,7 @@ public sealed class ContentGenerationService(
             if (item.CategoryId is { } catId)
                 category = (await categoryProvider.GetActiveAsync(ct)).FirstOrDefault(c => c.Id == catId)?.Name;
 
-            var bytes = await videoRenderer.RenderSlidesVideoAsync(title, text!, music, style, category, ct);
+            var bytes = await videoRenderer.RenderSlidesVideoAsync(title, text!, music, style, category, bgImage, ct);
             var url = await mediaStore.SaveAsync(bytes, "video/mp4", ct);
             var o = mediaOptions.Value;
             item.AddMedia(MediaKind.Video, url, o.VideoWidth > 0 ? o.VideoWidth : 1080,
@@ -448,8 +491,10 @@ public sealed class ContentGenerationService(
 
         logger.LogInformation("Kaynak makale metni alındı ({Len} kr): {Url}", article!.Length, item.SourceUrl);
         return $"Baslik: {item.RawTitle}\n\n" +
-               "KAYNAK MAKALENIN TAM METNI asagida. Bu metni OZGUN sekilde, kendi cumlelerinle YENIDEN YAZ; " +
-               "cumleleri birebir KOPYALAMA/cevirme. Kaynaktaki tum onemli bilgi, veri ve atiflari koru; olmayani uydurma.\n\n" +
+               "KAYNAK MAKALENIN TAM METNI asagida. Bu metni OZGUN sekilde, kendi cumlelerinle ve KENDI KURGUNLA YENIDEN YAZ; " +
+               "cumleleri birebir KOPYALAMA/cevirme, paragraf sirasini izleme. Kaynaktaki TUM somut olgulari " +
+               "(sayilar, tarihler, adetler, kisi/kurum adlari, kararlar, takvimler) ve atiflari KORU; olmayani uydurma; " +
+               "kaynak hakkinda meta cumle ('kaynak belirtmiyor' gibi) yazma.\n\n" +
                $"--- KAYNAK MAKALE ---\n{article}";
     }
 
@@ -464,9 +509,19 @@ public sealed class ContentGenerationService(
         var item = await repository.GetAsync(contentItemId, ct);
         if (item is null) return Result.Failure(Error.NotFound("İçerik"));
 
-        // Girdi önceliği: (1) panelden verilen not/seed, (2) kaynak sayfadan çıkarılan TAM makale metni,
-        // (3) RSS özeti. Böylece "tüm alanları üret" kaynaktaki gerçek makaleyle beslenir → kaliteli + özgün.
-        var input = !string.IsNullOrWhiteSpace(seedInput) ? seedInput! : await BuildAiInputAsync(item, ct);
+        // Girdi kuralı: KISA seed (panel kutusu RSS özetiyle dolu gelir) TAM MAKALEYİ GÖLGELEMESİN.
+        // Eskiden kutu doluysa model YALNIZ 1-2 cümlelik özeti görüyordu → olguları bilmeden aynı
+        // fikri tekrarlayıp şişiriyordu (Gurman atfı, gizlilik, pilot gibi ayrıntılar hiç gelemezdi).
+        // Şimdi: uzun seed (kullanıcının yapıştırdığı gerçek metin) tek başına esas alınır; kısa seed
+        // ise kaynak sayfadan çıkarılan TAM makale metniyle BİRLEŞTİRİLİR (seed ek not olarak başta).
+        string input;
+        var seed = seedInput?.Trim();
+        if (string.IsNullOrWhiteSpace(seed))
+            input = await BuildAiInputAsync(item, ct);
+        else if (seed!.Length >= 1200 || string.IsNullOrWhiteSpace(item.SourceUrl))
+            input = seed;
+        else
+            input = "EK NOT/OZET (panelden): " + seed + "\n\n" + await BuildAiInputAsync(item, ct);
         try
         {
             // Panelden üretim: KISMİ sonuç da kabul (hiç doldurmamaktan iyidir; eksik alan ✨ ile tamamlanır).
@@ -525,7 +580,7 @@ public sealed class ContentGenerationService(
             result.RawJson.Length > 200 ? result.RawJson[..200] : result.RawJson);
         var strict = SystemPrompt +
             " SON UYARI: Cikti SADECE tek bir GECERLI JSON NESNESI olacak — kod citi (```), aciklama, giris cumlesi, JSON disinda TEK KARAKTER bile YOK. " +
-            "TUM alanlar DOLU olacak: title, shortX, bodyHtml (en az 600 kelime), instagramCaption, tags, primaryKeyword, imageAltText.";
+            "TUM alanlar DOLU olacak: title, shortX, bodyHtml (kaynak yeterliyse 600+ kelime; kaynak azsa TEKRARLA SISIRMEDEN dogal uzunluk), instagramCaption, tags, primaryKeyword, imageAltText.";
         Fields second;
         string retryRaw;
         try
@@ -611,7 +666,7 @@ public sealed class ContentGenerationService(
     {
         "title" => "Aşağıdaki içerikten TÜRKÇE, özgün, SOMUT, SEO uyumlu, tıklanır YENİ bir başlık üret. Kaynağın başlığını aynen kullanma/birebir çevirme AMA kaynaktaki asıl konuyu yansıt (gerekiyorsa kişi/kurum adı geçebilir); genel/klişe olmasın; ana anahtar kelimeyi içersin, ~50-65 karakter. Kaynak İngilizce olsa bile çıktı Türkçe olsun. YALNIZCA başlığı düz metin döndür; tırnak/açıklama/JSON yok.",
         "shortX" => "Aşağıdaki içerikten X (Twitter) için TÜRKÇE, EN FAZLA 280 karakter, TEK BAŞINA anlaşılır NET bir ÖZET üret: kim + ne dedi/ne oldu açık olsun (kişi/kurum + iddia). Kaynakta bir kişi/kuruma atıf varsa koru, 'uzmanlar' gibi belirsizleştirme; sitenin kendi görüşü gibi yazma. Belirsiz teaser değil (gerekirse 1-2 hashtag). YALNIZCA metni döndür.",
-        "bodyHtml" => "Aşağıdaki kaynağı TÜRKÇE, özgün, telifsiz ve SEO'ya uygun UZUNLUKTA (en az 600, mümkünse 700-1000 kelime) bir blog gövdesi olarak AKTAR. Kaynaktaki kişi/kurum atıflarını koru ('uzmanlar' gibi belirsizleştirme, sitenin görüşü gibi sunma); uydurma bilgi ekleme. En az 2-3 <h2> (gerekirse <h3>) alt başlık kullan; her paragrafı <p>...</p> ile sar; ana anahtar kelimeyi başlıkta ve ilk paragrafta doğal kullan. Kaynak İngilizce olsa bile çıktı Türkçe olsun. YALNIZCA HTML gövdeyi döndür.",
+        "bodyHtml" => "Aşağıdaki kaynağı TÜRKÇE, özgün, telifsiz ve SEO'ya uygun bir blog gövdesi olarak AKTAR (hedef 600-1000 kelime; ama kaynak azsa AYNI fikirleri tekrarlayarak şişirme — dolu 400 kelime, tekrarlı 800 kelimeden iyidir). Kaynaktaki TÜM somut olguları (sayı, tarih, adet, kişi/kurum, karar, takvim) metne taşı; kaynak birden çok neden/katman sayıyorsa hepsini tek tek yaz. 'Kaynak belirtmiyor' gibi meta cümleler YASAK — bilgi yoksa o konuyu hiç açma. Kaynağın paragraf sırasını izleme; olguları önem sırasına göre kendi kurgunla düzenle. Kaynaktaki kişi/kurum atıflarını koru ('uzmanlar' gibi belirsizleştirme, sitenin görüşü gibi sunma); uydurma bilgi ekleme. En az 2-3 <h2> (gerekirse <h3>) alt başlık kullan; her paragrafı <p>...</p> ile sar; ana anahtar kelimeyi başlıkta ve ilk paragrafta doğal kullan. Kaynak İngilizce olsa bile çıktı Türkçe olsun. YALNIZCA HTML gövdeyi döndür.",
         "instagramCaption" => "Aşağıdaki içerikten Instagram için TÜRKÇE, EN FAZLA 2200 karakter, TEK BAŞINA anlaşılır akıcı bir özet üret: kim/ne/neden açık olsun; kaynaktaki kişi/kurum atfını koru (uygunsa hashtag). YALNIZCA metni döndür.",
         "tags" => "Aşağıdaki içerik için TÜRKÇE 3-8 kısa SEO etiketi üret. YALNIZCA etiketleri virgülle ayırarak döndür (ör: kripto, bitcoin, regülasyon).",
         _ => null

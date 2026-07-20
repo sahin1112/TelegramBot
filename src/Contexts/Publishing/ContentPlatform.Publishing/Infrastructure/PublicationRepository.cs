@@ -41,9 +41,9 @@ internal sealed class PublicationRepository(PublishingDbContext db) : IPublicati
     public async Task AddAsync(Publication publication, CancellationToken ct) =>
         await db.Publications.AddAsync(publication, ct);
 
-    public async Task<IReadOnlyList<Publication>> GetRetriableAsync(int maxAttempts, int take, CancellationToken ct) =>
+    public async Task<IReadOnlyList<Publication>> GetStuckPendingAsync(DateTimeOffset olderThan, int take, CancellationToken ct) =>
         await db.Publications
-            .Where(x => x.Status == PublicationStatus.Failed && x.Attempts < maxAttempts)
+            .Where(x => x.Status == PublicationStatus.Pending && (x.UpdatedAt ?? x.CreatedAt) <= olderThan)
             .OrderBy(x => x.CreatedAt).Take(take).ToListAsync(ct);
 
     public async Task<IReadOnlyList<Publication>> GetDueScheduledAsync(DateTimeOffset now, int take, CancellationToken ct) =>

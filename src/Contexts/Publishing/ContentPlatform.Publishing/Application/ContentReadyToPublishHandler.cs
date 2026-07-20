@@ -47,40 +47,74 @@ public sealed class ContentReadyToPublishHandler(
         {
             if (!registry.Supports(channel)) continue; // adaptörü yok → bu kanala hiç Publication açma
 
-            var targets = await targetResolver.ResolveAsync(e.CategoryId, e.TestMode, channel, ct);
+            // KANAL İZOLASYONU: bir kanalın hedef çözümü/gönderimi patlasa bile KALAN kanallar işlenir.
+            // (Eskiden tek istisna tüm döngüyü öldürüyordu → "4 platformdan 2'sine gitti, 2'sine hiç
+            // Publication açılmadı" tutarsızlığının ana kaynağıydı.)
+            IReadOnlyList<ResolvedTarget> targets;
+            try { targets = await targetResolver.ResolveAsync(e.CategoryId, e.TestMode, channel, ct); }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Hedefler çözülemedi (kanal={Channel}) — öteki kanallar etkilenmez.", channel);
+                continue;
+            }
             if (targets.Count == 0) continue;
             totalTargets += targets.Count;
 
             foreach (var target in targets)
             {
-                var existing = await publications.FindAsync(e.ContentItemId, channel, target.ExternalTargetId, ct);
-                if (existing is { Status: PublicationStatus.Published }) continue; // idempotent
+                Publication? pub = null;
+                try
+                {
+                    var existing = await publications.FindAsync(e.ContentItemId, channel, target.ExternalTargetId, ct);
+                    if (existing is { Status: PublicationStatus.Published }) continue; // idempotent
 
-                var pub = existing;
-                if (pub is null)
-                {
-                    pub = new Publication(e.ContentItemId, channel, target.SocialAccountId, target.ExternalTargetId, payloadJson,
-                        e.CategoryId, scheduledAt, clock);
-                    await publications.AddAsync(pub, ct);
-                }
-                else
-                {
-                    // İçerik yeniden yayına gönderildi (düzenleme / elle "Yayınla"): anlık kopyayı tazele.
-                    pub.RefreshPayload(payloadJson, clock);
-                    // Elle yeni zaman verildiyse ona çek; Failed ise plana/hemene alıp YENİDEN dene.
-                    if (e.ScheduledAt is not null || pub.Status == PublicationStatus.Failed)
-                        pub.Reschedule(e.ScheduledAt ?? scheduledAt, clock);
-                }
+                    pub = existing;
+                    if (pub is null)
+                    {
+                        pub = new Publication(e.ContentItemId, channel, target.SocialAccountId, target.ExternalTargetId, payloadJson,
+                            e.CategoryId, scheduledAt, clock);
+                        await publications.AddAsync(pub, ct);
+                    }
+                    else
+                    {
+                        // İçerik yeniden yayına gönderildi (düzenleme / elle "Yayınla"): anlık kopyayı tazele
+                        // ve hedefin GÜNCEL hesabına bağla (hesap silinip yeniden bağlandıysa Id değişmiştir).
+                        pub.Rebind(target.SocialAccountId, clock);
+                        pub.RefreshPayload(payloadJson, clock);
+                        // Elle yeni zaman verildiyse ona çek; Failed ise plana/hemene alıp YENİDEN dene.
+                        if (e.ScheduledAt is not null || pub.Status == PublicationStatus.Failed)
+                            pub.Reschedule(e.ScheduledAt ?? scheduledAt, clock);
+                    }
 
-                // Gelecek bir zamana planlıysa şimdi gönderme; ScheduledDispatchJob zamanı gelince gönderir.
-                if (pub.Status == PublicationStatus.Scheduled)
-                {
+                    // Kayıt gönderimden ÖNCE kalıcılaşır: süreç tam bu anda kesilse bile yayın KAYBOLMAZ —
+                    // takılı kalan Pending kayıtlarını OutboxDispatchJob kurtarıp yeniden planlar.
                     await publications.SaveChangesAsync(ct);
-                    continue;
-                }
 
-                await distribution.PublishOneAsync(pub, ct);
-                await publications.SaveChangesAsync(ct);
+                    // Gelecek bir zamana planlıysa şimdi gönderme; ScheduledDispatchJob zamanı gelince gönderir.
+                    if (pub.Status == PublicationStatus.Scheduled) continue;
+
+                    await distribution.PublishOneAsync(pub, ct);
+                    await publications.SaveChangesAsync(ct);
+                }
+                catch (Exception ex)
+                {
+                    // HEDEF İZOLASYONU: tek hedef patladı → yalnız BU hedefi 1 dk sonraya planla,
+                    // kalan hedefler/kanallar devam etsin. Kayıt CancellationToken.None ile yazılır —
+                    // istek iptali durumu bile kaydı engelleyemez.
+                    logger.LogError(ex, "Yayın hedefi işlenemedi (kanal={Channel} hedef={Target}); 1 dk sonraya planlandı.", channel, target.ExternalTargetId);
+                    try
+                    {
+                        if (pub is not null)
+                        {
+                            pub.Reschedule(clock.UtcNow.AddMinutes(1), clock);
+                            await publications.SaveChangesAsync(CancellationToken.None);
+                        }
+                    }
+                    catch (Exception ex2)
+                    {
+                        logger.LogError(ex2, "Yayın kurtarma kaydı da başarısız (kanal={Channel} hedef={Target}).", channel, target.ExternalTargetId);
+                    }
+                }
             }
         }
 

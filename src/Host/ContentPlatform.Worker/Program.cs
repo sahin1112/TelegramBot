@@ -64,7 +64,7 @@ builder.Services.AddQuartz(q =>
     q.AddTrigger(t => t.ForJob(drainKey).WithIdentity($"{nameof(PipelineDrainJob)}-trigger")
         .WithSimpleSchedule(s => s.WithIntervalInMinutes(1).RepeatForever()));
 
-    // Başarısız yayınları yeniden dene: 30 sn'de bir
+    // Takılı (Pending) yayın kurtarma taraması: 30 sn'de bir (başarısızlar artık kendi gecikmeli planıyla döner)
     var outboxKey = new JobKey(nameof(OutboxDispatchJob));
     q.AddJob<OutboxDispatchJob>(o => o.WithIdentity(outboxKey));
     q.AddTrigger(t => t.ForJob(outboxKey).WithIdentity($"{nameof(OutboxDispatchJob)}-trigger")

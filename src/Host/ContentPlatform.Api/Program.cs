@@ -92,6 +92,22 @@ app.UseExceptionHandler(errApp => errApp.Run(async context =>
 app.UseSerilogRequestLogging();
 app.UseResponseCompression();
 app.UseDefaultFiles();
+// /media, MediaOptions.StoragePath'ten servis edilir (Media:StoragePath MUTLAK ve Worker'la ORTAK
+// olmalı — ör. C:\Datas\media). Böylece Telegram butonlarıyla WORKER'da üretilen görsel/video da
+// panelde ve sitede görünür. Dosya burada yoksa bir sonraki (wwwroot) static middleware'e düşer —
+// eski Api-wwwroot dosyaları çalışmaya devam eder.
+{
+    var mediaRoot = Path.GetFullPath(
+        app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentPlatform.Editorial.Infrastructure.MediaOptions>>()
+            .Value.StoragePath, AppContext.BaseDirectory);
+    Directory.CreateDirectory(mediaRoot);
+    app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
+    {
+        RequestPath = "/media",
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(mediaRoot),
+        OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "public,max-age=2592000,immutable"
+    });
+}
 app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
 {
     OnPrepareResponse = ctx =>

@@ -61,5 +61,23 @@ public sealed class ManualContentService(IContentRepository repository, IRiskCla
         return item.Id;
     }
 
+    /// <summary>
+    /// Telegram admin grubundan LİNK ile içerik: /kategori https://... → içerik TASLAK oluşturulur
+    /// (Origin=TelegramAdmin), SourceUrl'den TAM makale metni çekilip AI üretimi yapılır (çağıran
+    /// GenerateDraftAsync + SubmitForReview'i tamamlar) → ONAY kuyruğuna düşer; otomatik yayınlanmaz.
+    /// </summary>
+    public async Task<Guid> AddFromLinkForReviewAsync(string url, Guid? categoryId, string createdByRef, CancellationToken ct)
+    {
+        var item = new ContentItem(
+            ContentOrigin.TelegramAdmin, useAi: true, ImageSource.SkiaCard,
+            riskClassifier.Classify(null, url), categoryId, testMode: false,
+            NewHash(), sourceUrl: url, rawTitle: null, rawInput: null,
+            ActorType.TelegramMember, createdByRef, clock);
+        await repository.AddAsync(item, ct);
+        audit.Log(item.Id, AuditEvent.Created, ActorType.TelegramMember, createdByRef, "Telegram admin komutu (link)");
+        await repository.SaveChangesAsync(ct);
+        return item.Id;
+    }
+
     private static string NewHash() => $"manual:{Guid.NewGuid():N}";
 }

@@ -9,6 +9,8 @@ public sealed record ContentSummaryDto(
     MediaStatus MediaStatus,
     RiskLevel RiskLevel,
     string? Title,
+    Guid? CategoryId,
+    bool TestMode,
     DateTimeOffset CreatedAt);
 
 public sealed record ApproveRequest(ImageSource? ImageSource, bool? TestMode, DateTimeOffset? ScheduledAt);
@@ -49,5 +51,6 @@ public sealed record GenerateFieldRequest(string Field, string? Title, string? S
 /// CardStyle: SkiaCard şablon indeksi (0..23); null = RASTGELE (her basışta farklı tasarım).</summary>
 public sealed record PreviewImageRequest(ImageSource ImageSource, int? CardStyle = null);
 
-/// <summary>Slayt videosu üretim isteği. Style: 0..19 şablon indeksi; null = RASTGELE.</summary>
-public sealed record PreviewVideoRequest(int? Style = null);
+/// <summary>Slayt videosu üretim isteği. Style: 0..19 şablon indeksi; null = RASTGELE.
+/// AiBackground=true → şablon zemini yerine habere uygun DİKEY AI görseli arka plan yapılır (görsel maliyeti eklenir).</summary>
+public sealed record PreviewVideoRequest(int? Style = null, bool? AiBackground = null);
