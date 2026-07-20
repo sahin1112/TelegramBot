@@ -35,6 +35,13 @@ internal static class PlatformEndpoints
             return d is null ? Results.NotFound() : Results.Ok(d);
         });
 
+        // Hesap düzenleme: ad + (dolu gönderilen) kimlik alanları (ör. yanlış BotToken düzeltme)
+        g.MapPut("/{id:guid}", async (Guid id, UpdateSocialAccountRequest req, SocialAccountService svc, CancellationToken ct) =>
+        {
+            var r = await svc.UpdateAccountAsync(id, req, ct);
+            return r.IsSuccess ? Results.Ok() : Results.BadRequest(r.Error);
+        });
+
         g.MapPost("/{id:guid}/disable", async (Guid id, SocialAccountService svc, CancellationToken ct) =>
         {
             var r = await svc.DisableAccountAsync(id, ct);

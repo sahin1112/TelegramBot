@@ -39,7 +39,9 @@ public sealed class ContentItem : Entity
         RawTitle = rawTitle;
         RawInput = rawInput;
         CreatedByType = createdByType;
-        CreatedByRef = createdByRef;
+        // Kolon sınırına (1000) savunmacı kırpma: aşırı uzun kaynak URL'leri INSERT'i patlatmasın
+        // ("String or binary data would be truncated" — content_items.CreatedByRef hatası düzeltmesi).
+        CreatedByRef = createdByRef.Length <= 1000 ? createdByRef : createdByRef[..1000];
         CreatedAt = clock.UtcNow;
 
         // Girdi tipine göre başlangıç durumu (bkz. 00 §7).

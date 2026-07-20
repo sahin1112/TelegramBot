@@ -753,7 +753,7 @@ async function renderAccounts(){
       <span class="chip ok">Telegram: AKTİF</span> · <span class="chip ok">X: AKTİF</span> (metin + görsel + video; OAuth ile bağla) · <span class="chip ok">Instagram: AKTİF</span> (foto + Reels) · <span class="chip ok">Threads: AKTİF</span> (metin + foto + video) · <span class="chip ok">YouTube: AKTİF</span> (Shorts — yalnız videolu içerik) · <span class="chip ok">TikTok: AKTİF</span> (yalnız videolu içerik; denetim onayına dek "yalnız ben" kalabilir).</div></div>`+
     `<div class="card"><table><thead><tr><th>Ad</th><th>Platform</th><th>Durum</th><th>Token bitiş</th><th style="width:130px"></th></tr></thead><tbody>${
       list.map(a=>`<tr data-id="${a.id}"><td>${h(a.displayName)}</td><td>${h(a.platform)}</td><td>${a.status==='Active'?'<span class=\"chip ok\">Aktif</span>':(a.status==='Error'?'<span class=\"chip dng\">Hata</span>':'<span class=\"chip mut\">Kapalı</span>')}</td>
-        <td class="muted">${a.tokenExpiresAt?new Date(a.tokenExpiresAt).toLocaleDateString('tr'):'—'}</td><td><button class="btn sm a-det">Hedefler</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hesap yok.</td></tr>'
+        <td class="muted">${a.tokenExpiresAt?new Date(a.tokenExpiresAt).toLocaleDateString('tr'):'—'}</td><td class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm a-det">Hedefler</button><button class="btn sm a-edit">Düzenle</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Hesap yok.</td></tr>'
     }</tbody></table></div>`;
   // Medya önceliği kartı (platform başına görsel/video)
   const PREF_PLATFORMS=[['telegram','Telegram'],['x','X (Twitter)'],['instagram','Instagram'],['threads','Threads'],['youtube','YouTube'],['tiktok','TikTok']];
@@ -817,7 +817,7 @@ async function renderAccounts(){
       window.addEventListener('message',e=>{ if(e.data==='meta-connected'){ toast('Hesap bağlandı ✓'); if(location.hash==='#accounts') route(); } }); }
   }catch(e){}
   $('#acc-new').onclick=()=>accountForm();
-  $('#view').addEventListener('click',e=>{ const tr=e.target.closest('tr[data-id]'); if(tr&&e.target.classList.contains('a-det')) accountDetail(tr.dataset.id); });
+  $('#view').addEventListener('click',e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; if(e.target.classList.contains('a-det')) accountDetail(tr.dataset.id); else if(e.target.classList.contains('a-edit')) accountEditForm(tr.dataset.id); });
 }
 function accountForm(){
   openModal(`<span class="x" onclick="closeModal()">×</span><h2>Hesap Ekle</h2>
@@ -832,6 +832,24 @@ function accountForm(){
     const creds={}; $('#modal').querySelectorAll('.cred').forEach(i=>creds[i.dataset.k]=i.value);
     const exp=$('#ac-exp').value?new Date($('#ac-exp').value).toISOString():null;
     try{ await api('/social-accounts',{method:'POST',body:{platform:$('#ac-p').value,displayName:$('#ac-name').value,credentials:creds,tokenExpiresAt:exp,siteId:null}}); toast('Hesap eklendi'); closeModal(); route(); }catch(e){toast(e.message,true);}
+  };
+}
+// Hesap düzenleme: ad + kimlik alanları. Boş bırakılan kimlik alanı DEĞİŞMEZ (token'ı yeniden
+// girmek zorunlu değil) — yanlış girilmiş BotToken'ı hesabı silmeden düzeltmek için.
+async function accountEditForm(id){
+  const d=await api(`/social-accounts/${id}`);
+  const keys=CREDS[d.platform]||[];
+  openModal(`<span class="x" onclick="closeModal()">×</span><h2>Hesabı düzenle — ${h(d.platform)}</h2>
+    <div class="muted" style="font-size:12px;margin:6px 0">${CRED_HINTS[d.platform]||''}</div>
+    <label>Görünen ad</label><input id="ae-name" type="text" value="${h(d.displayName)}">
+    ${keys.map(k=>`<label>${k}</label><input type="password" class="ecred" data-k="${k}" placeholder="kayıtlı ✓ — değiştirmek için yeni değeri yaz">`).join('')}
+    <label>Token bitiş (opsiyonel — IG/Threads)</label><input id="ae-exp" type="text" placeholder="2026-09-01" value="${d.tokenExpiresAt?String(d.tokenExpiresAt).substring(0,10):''}">
+    <div class="muted" style="font-size:11.5px;margin-top:6px">Boş bıraktığın kimlik alanları aynen KORUNUR; yalnız doldurdukların güncellenir. Telegram token'ı <code>123456789:AA…</code> biçiminde olmalı (BotFather).</div>
+    <div class="row" style="margin-top:14px"><button class="btn pri" id="ae-save">Kaydet (şifreli)</button><button class="btn" onclick="closeModal()">Vazgeç</button></div>`);
+  $('#ae-save').onclick=async()=>{
+    const creds={}; $('#modal').querySelectorAll('.ecred').forEach(i=>{ const v=i.value.trim(); if(v) creds[i.dataset.k]=v; });
+    const exp=$('#ae-exp').value.trim()?new Date($('#ae-exp').value.trim()).toISOString():null;
+    try{ await api(`/social-accounts/${id}`,{method:'PUT',body:{displayName:$('#ae-name').value,credentials:creds,tokenExpiresAt:exp}}); toast('Hesap güncellendi'); closeModal(); route(); }catch(e){toast(e.message,true);}
   };
 }
 let CUR_TARGETS=[], CUR_CATS=[];
@@ -849,7 +867,7 @@ async function accountDetail(id){
     <table><thead><tr><th>Başlık</th><th>Rol</th><th>Kategori</th><th>Dış ID</th><th>Durum</th><th></th></tr></thead><tbody>${
       d.targets.map((t,i)=>`<tr><td>${h(t.title)}${t.showOnHome?' <span class="chip ok" title="Ana sayfada yayınlanıyor">🏠 Ana sayfa</span>':''}</td><td><span class="chip ${t.role==='AdminInbox'?'test':t.role==='Test'?'warn':'mut'}">${h(t.role)}</span></td><td>${t.categoryId?`<span class="muted">${h(catName(cl,t.categoryId))}</span>`:'<span class="chip ok">Tüm kategoriler</span>'}</td><td class="muted">${h(t.externalTargetId)}</td><td>${t.isActive?'<span class="chip ok">Aktif</span>':'<span class="chip mut">Kapalı</span>'}</td><td class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="targetForm('${id}',${i})">Düzenle</button><button class="btn sm" onclick="toggleTarget('${t.id}',${t.isActive?'false':'true'},'${id}')">${t.isActive?'Kapat':'Aç'}</button><button class="btn dng sm" onclick="deleteTarget('${t.id}','${id}')">Sil</button></td></tr>`).join('')||'<tr><td colspan=6 class="empty">Hedef yok.</td></tr>'
     }</tbody></table>
-    <div class="row" style="margin-top:14px"><button class="btn pri" onclick="targetForm('${id}',null)">+ Hedef ekle</button><button class="btn right" onclick="disableAccount('${id}')">Hesabı kapat</button><button class="btn dng" onclick="deleteAccount('${id}')">Hesabı sil</button></div>`);
+    <div class="row" style="margin-top:14px"><button class="btn pri" onclick="targetForm('${id}',null)">+ Hedef ekle</button><button class="btn right" onclick="accountEditForm('${id}')">Hesabı düzenle</button><button class="btn" onclick="disableAccount('${id}')">Hesabı kapat</button><button class="btn dng" onclick="deleteAccount('${id}')">Hesabı sil</button></div>`);
 }
 // Hedef ekle/düzenle ortak formu. idx null → yeni ekleme; sayı → CUR_TARGETS[idx] düzenleme.
 function targetForm(accountId, idx){

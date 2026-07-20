@@ -3,6 +3,7 @@ using System;
 using ContentPlatform.Editorial.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -11,9 +12,10 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ContentPlatform.Editorial.Infrastructure.Migrations
 {
     [DbContext(typeof(EditorialDbContext))]
-    partial class EditorialDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720190000_WidenActorRefs")]
+    partial class WidenActorRefs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

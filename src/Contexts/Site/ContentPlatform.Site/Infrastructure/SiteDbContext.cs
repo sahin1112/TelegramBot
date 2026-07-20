@@ -30,7 +30,13 @@ public sealed class SiteDbContext(DbContextOptions<SiteDbContext> options) : DbC
             e.Property(x => x.Tags)
                 .HasConversion(
                     v => string.Join('\n', v),
-                    v => v.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList());
+                    v => v.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                    // ValueComparer: koleksiyon değişiklikleri öğe bazında izlensin (log'daki
+                    // "collection type with a value converter but with no value comparer" uyarısının çözümü)
+                    new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<string>>(
+                        (a, b) => (a ?? new List<string>()).SequenceEqual(b ?? new List<string>()),
+                        v => v.Aggregate(0, (h, s) => HashCode.Combine(h, s.GetHashCode())),
+                        v => v.ToList()));
         });
 
         b.Entity<Comment>(e =>

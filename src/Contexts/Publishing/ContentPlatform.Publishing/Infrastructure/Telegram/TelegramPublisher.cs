@@ -31,6 +31,13 @@ internal sealed class TelegramPublisher(
     {
         if (!credentials.Values.TryGetValue("BotToken", out var token) || string.IsNullOrWhiteSpace(token))
             return new PublishResult(false, null, Error.Validation("Telegram BotToken eksik."));
+        token = token.Trim();
+        if (!TelegramToken.LooksValid(token))
+        {
+            // Yanlış girilmiş token (ör. token alanına şifre yazılması) → API'ye hiç gitme, net hata dön.
+            logger.LogWarning("Telegram BotToken formatı geçersiz ('{Masked}') — hesap kimliğini panelden düzeltin.", TelegramToken.Mask(token));
+            return new PublishResult(false, null, Error.Validation("Telegram BotToken formatı geçersiz (beklenen: 123456789:AA... — BotFather'dan alınır). Panel → Sosyal Hesaplar'dan düzeltin."));
+        }
 
         var client = httpClientFactory.CreateClient(HttpClientName);
         var baseUrl = $"https://api.telegram.org/bot{token}";
@@ -73,7 +80,7 @@ internal sealed class TelegramPublisher(
                 // ("/media/x.png") "invalid file HTTP URL: URL host is empty" verir → bu dala GİRME,
                 // görselsiz metne düş (multipart bytes yolu zaten yukarıda; bu yalnız fallback).
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendPhoto",
-                    new { chat_id = request.TargetRef, photo = request.MediaUrl, caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
+                    JsonBody(replyMarkup, ("chat_id", request.TargetRef), ("photo", request.MediaUrl!), ("caption", caption), ("parse_mode", "HTML")), ct);
             }
             else if (request.VideoMedia is { } vm)
             {
@@ -95,13 +102,14 @@ internal sealed class TelegramPublisher(
             else if (IsPublicHttpUrl(request.VideoUrl))
             {
                 // VİDEO — yerel dosya okunamadıysa public URL yedeği (Telegram kendisi indirir; limit 20 MB).
-                response = await client.PostAsJsonAsync($"{baseUrl}/sendVideo",
-                    new { chat_id = request.TargetRef, video = request.VideoUrl, caption, parse_mode = "HTML", supports_streaming = true, reply_markup = replyMarkup }, ct);
+                var body = JsonBody(replyMarkup, ("chat_id", request.TargetRef), ("video", request.VideoUrl!), ("caption", caption), ("parse_mode", "HTML"));
+                body["supports_streaming"] = true;
+                response = await client.PostAsJsonAsync($"{baseUrl}/sendVideo", body, ct);
             }
             else
             {
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendMessage",
-                    new { chat_id = request.TargetRef, text = caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
+                    JsonBody(replyMarkup, ("chat_id", request.TargetRef), ("text", caption), ("parse_mode", "HTML")), ct);
             }
 
             using (response)
@@ -119,6 +127,19 @@ internal sealed class TelegramPublisher(
             logger.LogError(ex, "Telegram istek hatası");
             return new PublishResult(false, null, Error.Unexpected($"Telegram istek hatası: {ex.Message}"));
         }
+    }
+
+    /// <summary>
+    /// JSON gövdesini sözlük olarak kurar; reply_markup YALNIZ doluysa eklenir.
+    /// KRİTİK: "reply_markup": null GÖNDERİLMEZ — Telegram JSON gövdede null'ı obje sanmayıp
+    /// "400 Bad Request: object expected as reply markup" döndürür (tüm kanal yayınlarını bozan hata buydu).
+    /// </summary>
+    private static Dictionary<string, object> JsonBody(JsonElement? replyMarkup, params (string Key, string Value)[] fields)
+    {
+        var body = new Dictionary<string, object>();
+        foreach (var (k, v) in fields) body[k] = v;
+        if (replyMarkup is { } rm) body["reply_markup"] = rm;
+        return body;
     }
 
     private static string BuildText(PublishRequest r, bool linkInCaption)

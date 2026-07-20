@@ -28,6 +28,7 @@ public sealed class TelegramCommandPoller(
 {
     private readonly Dictionary<string, long> _offsets = new(); // token -> bir sonraki offset
     private readonly Dictionary<string, string> _cmdSignatures = new(); // token -> son kaydedilen komut imzası
+    private readonly Dictionary<Guid, DateTimeOffset> _invalidTokenWarnedAt = new(); // hesap -> son geçersiz-token uyarısı
     private DateTimeOffset _lastCmdSync = DateTimeOffset.MinValue;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -79,7 +80,22 @@ public sealed class TelegramCommandPoller(
             {
                 var creds = svc.DecryptCredentials(acc);
                 if (creds.TryGetValue("BotToken", out var t) && !string.IsNullOrWhiteSpace(t))
-                    tokens.Add(t.Trim());
+                {
+                    t = t.Trim();
+                    // Biçimi bozuk token'ı (ör. token alanına şifre yazılmışsa) POLLAMA — aksi halde her
+                    // 25 sn'de bir 404 + "getUpdates hatasi" spam'i olur. Uyarı hesap adıyla, saatte 1 kez.
+                    if (!ContentPlatform.Abstractions.TelegramToken.LooksValid(t))
+                    {
+                        if (_invalidTokenWarnedAt.TryGetValue(acc.Id, out var last) is false || DateTimeOffset.UtcNow - last > TimeSpan.FromHours(1))
+                        {
+                            _invalidTokenWarnedAt[acc.Id] = DateTimeOffset.UtcNow;
+                            logger.LogWarning("Telegram hesabında GEÇERSİZ BotToken: hesap=\"{Name}\" ({Acc}) değer='{Masked}' — Panel → Sosyal Hesaplar → Düzenle ile gerçek BotFather token'ını girin. Bu hesap atlanıyor.",
+                                acc.DisplayName, acc.Id, ContentPlatform.Abstractions.TelegramToken.Mask(t));
+                        }
+                        continue;
+                    }
+                    tokens.Add(t);
+                }
             }
             catch (Exception ex) { logger.LogWarning(ex, "Bot token cozulemedi: hesap={Acc}", acc.Id); }
         }

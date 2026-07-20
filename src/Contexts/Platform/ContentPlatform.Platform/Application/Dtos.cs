@@ -10,6 +10,13 @@ public sealed record CreateSocialAccountRequest(
     DateTimeOffset? TokenExpiresAt,
     Guid? SiteId);
 
+/// <summary>Hesap düzenleme: ad her zaman; kimlik alanları YALNIZ doluysa değiştirilir
+/// (boş/eksik gönderilen alanlar mevcut değeri korur — token'ı yeniden girmek zorunlu değil).</summary>
+public sealed record UpdateSocialAccountRequest(
+    string DisplayName,
+    Dictionary<string, string>? Credentials,
+    DateTimeOffset? TokenExpiresAt);
+
 public sealed record AddTargetRequest(
     string ExternalTargetId, TargetType Type, TargetRole Role, Guid? CategoryId, string Title,
     string? Language, string? TimeZone, int? CharacterLimit,

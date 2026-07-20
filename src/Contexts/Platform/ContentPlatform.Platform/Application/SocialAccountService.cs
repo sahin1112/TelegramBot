@@ -19,6 +19,8 @@ public sealed class SocialAccountService(
             return Result.Failure<Guid>(Error.Validation("Görünen ad gerekli."));
         if (req.Credentials.Count == 0)
             return Result.Failure<Guid>(Error.Validation("Kimlik bilgileri boş olamaz."));
+        if (ValidateCredentials(req.Platform, req.Credentials) is { } err)
+            return Result.Failure<Guid>(err);
 
         var json = JsonSerializer.Serialize(req.Credentials);
         var encrypted = protector.Protect(json);
@@ -27,6 +29,60 @@ public sealed class SocialAccountService(
         await repository.AddAsync(account, ct);
         await repository.SaveChangesAsync(ct);
         return account.Id;
+    }
+
+    /// <summary>
+    /// Hesabı panelden düzenle: görünen ad + (dolu gönderilen) kimlik alanları. Kimlikte YALNIZ dolu
+    /// anahtarlar mevcut değerlerin ÜZERİNE yazılır — boş bırakılan alanlar korunur, token'ı yeniden
+    /// girmek gerekmez. Yanlış girilmiş BotToken'ı ("159753xX?*" vakası) silmeden düzeltmeyi sağlar.
+    /// </summary>
+    public async Task<Result> UpdateAccountAsync(Guid id, UpdateSocialAccountRequest req, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(req.DisplayName))
+            return Result.Failure(Error.Validation("Görünen ad gerekli."));
+
+        var account = await repository.GetAsync(id, ct);
+        if (account is null) return Result.Failure(Error.NotFound("Hesap"));
+
+        string? encrypted = null;
+        var incoming = (req.Credentials ?? new()).Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+                                                 .ToDictionary(kv => kv.Key, kv => kv.Value.Trim());
+        if (incoming.Count > 0)
+        {
+            Dictionary<string, string> merged;
+            try { merged = DecryptCredentials(account); }
+            catch { merged = new(); } // çözülemeyen eski kayıt → yeni girilenlerle baştan kur
+            foreach (var (k, v) in incoming) merged[k] = v;
+
+            if (ValidateCredentials(account.Platform, merged) is { } err)
+                return Result.Failure(err);
+
+            encrypted = protector.Protect(JsonSerializer.Serialize(merged));
+        }
+
+        account.UpdateInfo(req.DisplayName.Trim(), encrypted, req.TokenExpiresAt, clock);
+        try
+        {
+            await repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            logger.LogWarning(ex, "Hesap güncellenemedi (DB): {Id}", id);
+            return Result.Failure(Error.Conflict("Hesap güncellenemedi: " + (ex.InnerException?.Message ?? ex.Message)));
+        }
+        return Result.Success();
+    }
+
+    /// <summary>Platforma özgü kimlik biçim denetimi (şimdilik Telegram): hata varsa döner, yoksa null.</summary>
+    private static Error? ValidateCredentials(ContentPlatform.Abstractions.Platform platform, Dictionary<string, string> creds)
+    {
+        if (platform == ContentPlatform.Abstractions.Platform.Telegram
+            && creds.TryGetValue("BotToken", out var bt)
+            && !ContentPlatform.Abstractions.TelegramToken.LooksValid(bt))
+        {
+            return Error.Validation("Telegram BotToken biçimi geçersiz. BotFather'ın verdiği '123456789:AA…' biçimindeki token'ı girin (şifre değil).");
+        }
+        return null;
     }
 
     public async Task<Result> AddTargetAsync(Guid accountId, AddTargetRequest req, CancellationToken ct)

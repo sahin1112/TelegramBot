@@ -57,6 +57,21 @@ public sealed class SocialAccount : Entity
         Touch(clock);
     }
 
+    /// <summary>Panelden hesap düzenleme: ad ve (verildiyse) kimlik bilgileri. Kimlik değiştiyse
+    /// hesap yeniden Active yapılır ve son hata temizlenir (yanlış token düzeltme senaryosu).</summary>
+    public void UpdateInfo(string displayName, string? credentialsEncrypted, DateTimeOffset? tokenExpiresAt, IClock clock)
+    {
+        DisplayName = displayName;
+        if (credentialsEncrypted is not null)
+        {
+            CredentialsEncrypted = credentialsEncrypted;
+            Status = AccountStatus.Active;
+            LastError = null;
+        }
+        if (tokenExpiresAt is not null) TokenExpiresAt = tokenExpiresAt;
+        Touch(clock);
+    }
+
     public void MarkError(string error, IClock clock)
     {
         Status = AccountStatus.Error;

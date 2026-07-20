@@ -15,8 +15,10 @@ public sealed class ContentAuditEntry : Entity
         ContentItemId = contentItemId;
         Event = @event;
         ActorType = actorType;
-        ActorRef = actorRef;
-        Detail = detail;
+        // Kolon sınırlarına (ActorRef 1000, Detail 1000) savunmacı kırpma: uzun kaynak URL'leri
+        // audit INSERT'ini patlatmasın ("String or binary data would be truncated" düzeltmesi).
+        ActorRef = actorRef.Length <= 1000 ? actorRef : actorRef[..1000];
+        Detail = detail is { Length: > 1000 } ? detail[..1000] : detail;
         CreatedAt = clock.UtcNow;
     }
 
