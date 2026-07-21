@@ -102,7 +102,7 @@ internal static class PublishingEndpoints
     }
 
     private static PublicationDto Dto(Publication p) => new(
-        p.Id, p.ContentItemId, p.Channel.ToString(), p.TargetRef, p.Status.ToString(),
+        p.Id, p.ContentItemId, p.CategoryId, p.Channel.ToString(), p.TargetRef, p.Status.ToString(),
         p.ExternalId, p.Attempts, p.Error, p.CreatedAt, p.ScheduledAt, p.PublishedAt, TitleOf(p));
 
     /// <summary>Panelde "hangi içerik?" görünsün diye başlığı anlık kopyadan (payload) çözer.</summary>

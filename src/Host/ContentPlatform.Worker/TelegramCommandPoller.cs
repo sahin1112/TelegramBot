@@ -29,6 +29,10 @@ public sealed class TelegramCommandPoller(
     private readonly Dictionary<string, long> _offsets = new(); // token -> bir sonraki offset
     private readonly Dictionary<string, string> _cmdSignatures = new(); // token -> son kaydedilen komut imzası
     private DateTimeOffset _lastCmdSync = DateTimeOffset.MinValue;
+    // Ağır işleyiciler (link üretimi ~1 dk, buton görsel/video üretimi) poll döngüsünü BLOKLAMASIN
+    // diye arka planda çalıştırılır. Semafor=1: ağır işler yine TEK TEK sıralı işlenir (çifte yayın
+    // yarışı yok), ama döngü bu sırada getUpdates'e devam edip offset'i ilerletir → bot sağır kalmaz.
+    private readonly SemaphoreSlim _heavy = new(1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -120,9 +124,9 @@ public sealed class TelegramCommandPoller(
 
             if (u.CallbackQuery is { } cq)
             {
-                try { await HandleCallbackAsync(baseUrl, client, cq, ct); }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { logger.LogWarning(ex, "Telegram buton islenemedi: {Data}", cq.Data); }
+                // Ağır (görsel/video üretimi) → arka planda. Döngü offset'i hemen ilerletip
+                // long-poll'e devam etsin diye BEKLEMEDEN dağıtılır.
+                DispatchHeavy(() => HandleCallbackAsync(baseUrl, client, cq, ct), $"buton {cq.Data}");
                 continue;
             }
             var msg = u.Message ?? u.ChannelPost;
@@ -131,13 +135,28 @@ public sealed class TelegramCommandPoller(
             { await ReplyIdAsync(baseUrl, client, msg.Chat, ct); continue; }
             if (msg.Text is { } cmdText && cmdText.TrimStart().StartsWith('/'))
             {
-                // Komut işleme tek tek ve korumalı: bir komutun hatası polleri durdurmaz.
-                try { await HandleAdminCommandAsync(baseUrl, client, msg, ct); }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { logger.LogWarning(ex, "Telegram komutu islenemedi: {Text}", msg.Text); }
+                // Komut (link üretimi ~1 dk sürebilir) → arka planda. Böylece üretim sürerken
+                // gelen BAŞKA komut/mesajlar da anında alınır; bot bu süre boyunca 'sağır' kalmaz.
+                var m = msg;
+                DispatchHeavy(() => HandleAdminCommandAsync(baseUrl, client, m, ct), $"komut {m.Text}");
             }
         }
         _offsets[token] = maxId + 1;
+    }
+
+    /// <summary>Ağır işleyiciyi poll döngüsünü BLOKLAMADAN arka planda çalıştırır. Offset zaten
+    /// hemen ilerlediği için üretim sürerken getUpdates akmaya devam eder → bot yanıt vermeyi
+    /// sürdürür. _heavy semaforu ağır işleri tek tek sıralı tutar; hata yutulur (döngüyü düşürmez).</summary>
+    private void DispatchHeavy(Func<Task> work, string label)
+    {
+        _ = Task.Run(async () =>
+        {
+            await _heavy.WaitAsync();
+            try { await work(); }
+            catch (OperationCanceledException) { /* kapanış */ }
+            catch (Exception ex) { logger.LogWarning(ex, "Telegram isleyici hatasi: {Label}", label); }
+            finally { _heavy.Release(); }
+        });
     }
 
     private static bool IsGetIdCommand(string? text)

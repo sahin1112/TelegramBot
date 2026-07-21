@@ -7,7 +7,7 @@ public sealed record PublicationPayload(
     string? IgCaption = null); // Instagram'a özel uzun açıklama (varsa ShortX yerine bu gider)
 
 public sealed record PublicationDto(
-    Guid Id, Guid ContentItemId, string Channel, string TargetRef, string Status,
+    Guid Id, Guid ContentItemId, Guid? CategoryId, string Channel, string TargetRef, string Status,
     string? ExternalId, int Attempts, string? Error, DateTimeOffset CreatedAt,
     DateTimeOffset? ScheduledAt, DateTimeOffset? PublishedAt, string? Title);
 

@@ -140,6 +140,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}
       <a href="#add"><span class="ic">✎</span> İçerik Ekle</a>
       <a href="#categories"><span class="ic">▦</span> Kategoriler</a>
       <a href="#scheduled"><span class="ic">⏰</span> Planlanmış</a>
+      <div id="nav-sched-cats"></div>
       <a href="#pending"><span class="ic">🖼</span> Görsel Bekleyenler</a>
       <a href="#sources"><span class="ic">⛃</span> Kaynaklar</a>
       <a href="#accounts"><span class="ic">◎</span> Sosyal Hesaplar</a>
@@ -225,6 +226,14 @@ async function renderNavCats(){
     +`<a class="sub-cat" href="#content/none"><span class="ic">›</span> Kategorisiz</a>`;
   markNav();
 }
+/* Planlanmış alt menüsü: her kategori kendi izole planlı-yayın görünümüne link olur (#scheduled/<id>), + Kategorisiz. */
+async function renderNavSchedCats(){
+  const el=$('#nav-sched-cats'); if(!el) return;
+  const list=await cats().catch(()=>[]);
+  el.innerHTML=list.map(c=>`<a class="sub-cat" href="#scheduled/${c.id}"><span class="ic">›</span> ${h(c.name)}${c.isActive?'':' <span class="off">(kapalı)</span>'}</a>`).join('')
+    +`<a class="sub-cat" href="#scheduled/none"><span class="ic">›</span> Kategorisiz</a>`;
+  markNav();
+}
 function markNav(){
   const hash=(location.hash.replace('#','')||'dashboard');
   document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+hash));
@@ -239,6 +248,7 @@ async function route(){
   fresh.innerHTML='<div class="empty">Yükleniyor…</div>';
   try{ await fn(arg); }catch(e){ $('#view').innerHTML=`<div class="card empty">Hata: ${h(e.message)}</div>`; }
   renderNavCats().catch(()=>{}); // kategori alt menüsünü güncel tut (kategori ekle/kapat sonrası dahil)
+  renderNavSchedCats().catch(()=>{}); // Planlanmış alt menüsünü de kategorilerle güncel tut
 }
 window.addEventListener('hashchange',()=>{ for(const k in VIEW_STATE) delete VIEW_STATE[k]; route(); });
 
@@ -652,13 +662,21 @@ function cadenceText(c){
 }
 
 /* ---------------- Planlanmış ---------------- */
-async function renderScheduled(){
-  const list=await api('/publishing/scheduled');
-  $('#view').innerHTML=head('Planlanmış Yayınlar','Zamanı gelince otomatik gönderilecek yayınlar — yeniden planla, hemen gönder veya iptal et')+
-    `<div class="card"><table><thead><tr><th style="width:210px">Planlı zaman</th><th>İçerik</th><th style="width:90px">Kanal</th><th style="width:130px">Hedef</th><th style="width:260px"></th></tr></thead><tbody>${
-      list.sort((a,b)=>new Date(a.scheduledAt||0)-new Date(b.scheduledAt||0)).map(p=>`<tr data-id="${p.id}"><td>${fmtDT(p.scheduledAt)}<div class="muted" style="font-size:11px">${till(p.scheduledAt)}</div></td>
-        <td><a href="#" class="sc-open">${h(p.title||'(başlıksız içerik)')}</a></td><td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td>
-        <td class="row"><button class="btn sm sc-when">Yeniden planla</button><button class="btn pri sm sc-now">Şimdi gönder</button><button class="btn dng sm sc-cancel">İptal</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Planlı yayın yok. (Kadanslı kategorilerde onaylanan içerikler üretim sonrası burada belirir.)</td></tr>'
+async function renderScheduled(cat){
+  const [list, cl] = await Promise.all([ api('/publishing/scheduled'), cats() ]);
+  // Kategoriye göre izole görünüm: aynı sayfa filtrelenir (İçerikler ile aynı desen). cat yoksa = Tümü.
+  const view = cat==='none' ? list.filter(p=>!p.categoryId)
+             : cat ? list.filter(p=>p.categoryId===cat)
+             : list;
+  const catCol = !cat; // yalnız "Tümü" görünümünde Kategori kolonu göster
+  const title = cat==='none' ? 'Planlanmış · Kategorisiz'
+              : cat ? `Planlanmış · ${h(catName(cl,cat))}`
+              : 'Planlanmış Yayınlar';
+  $('#view').innerHTML=head(title,'Zamanı gelince otomatik gönderilecek yayınlar — yeniden planla, hemen gönder veya iptal et')+
+    `<div class="card"><table><thead><tr><th style="width:210px">Planlı zaman</th><th>İçerik</th>${catCol?'<th style="width:150px">Kategori</th>':''}<th style="width:90px">Kanal</th><th style="width:130px">Hedef</th><th style="width:260px"></th></tr></thead><tbody>${
+      view.sort((a,b)=>new Date(a.scheduledAt||0)-new Date(b.scheduledAt||0)).map(p=>`<tr data-id="${p.id}"><td>${fmtDT(p.scheduledAt)}<div class="muted" style="font-size:11px">${till(p.scheduledAt)}</div></td>
+        <td><a href="#" class="sc-open">${h(p.title||'(başlıksız içerik)')}</a></td>${catCol?`<td class="muted">${p.categoryId?h(catName(cl,p.categoryId)):'—'}</td>`:''}<td>${h(p.channel)}</td><td class="muted">${h(p.targetRef)}</td>
+        <td class="row"><button class="btn sm sc-when">Yeniden planla</button><button class="btn pri sm sc-now">Şimdi gönder</button><button class="btn dng sm sc-cancel">İptal</button></td></tr>`).join('')||`<tr><td colspan=${catCol?6:5} class="empty">Planlı yayın yok. (Kadanslı kategorilerde onaylanan içerikler üretim sonrası burada belirir.)</td></tr>`
     }</tbody></table></div>`;
   $('#view').addEventListener('click',async e=>{ const tr=e.target.closest('tr[data-id]'); if(!tr)return; const id=tr.dataset.id;
     if(e.target.classList.contains('sc-now')){ if(!confirm('Şimdi gönderilsin mi?'))return;
