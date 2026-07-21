@@ -130,6 +130,22 @@ public sealed class Publication : Entity
         Touch(clock);
     }
 
+    /// <summary>
+    /// "Şimdi gönder": planı öne al ama INLINE GÖNDERME. Status=Scheduled + ScheduledAt=now yapar →
+    /// arka plandaki ScheduledDispatchJob (≤1 dk) kaydı atomik sahiplenip gönderir. Böylece panel
+    /// isteği anında döner, kullanıcı gönderim bitene kadar beklemez. Gönderilemezse mevcut retry
+    /// mantığı (MarkFailedWithRetry: 5 deneme, artan gecikme, sonra dead-letter) devreye girer.
+    /// Not: Pending YAPMIYORUZ — Pending yalnız 10 dk'da bir OutboxDispatchJob'la kurtarılır (yavaş);
+    /// Scheduled+due ise 1 dk'lık ScheduledDispatchJob turunda hemen gider.
+    /// </summary>
+    public void QueueNow(IClock clock)
+    {
+        if (Status == PublicationStatus.Published) return;
+        Status = PublicationStatus.Scheduled;
+        ScheduledAt = clock.UtcNow;
+        Touch(clock);
+    }
+
     /// <summary>Planlı/başarısız yayını iptal et (bir daha denenmez).</summary>
     public void Cancel(IClock clock)
     {

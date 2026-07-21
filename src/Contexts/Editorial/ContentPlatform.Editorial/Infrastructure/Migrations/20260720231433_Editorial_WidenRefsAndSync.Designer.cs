@@ -4,6 +4,7 @@ using ContentPlatform.Editorial.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ContentPlatform.Editorial.Infrastructure.Migrations
 {
     [DbContext(typeof(EditorialDbContext))]
-    partial class EditorialDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720231433_Editorial_WidenRefsAndSync")]
+    partial class Editorial_WidenRefsAndSync
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -27,6 +27,17 @@ internal sealed class TelegramPublisher(
     public const string HttpClientName = "telegram";
     public Channel Channel => Channel.Telegram;
 
+    /// <summary>
+    /// JSON gövdeli çağrılarda null alanları TAMAMEN ATLA. Telegram, "reply_markup": null
+    /// gönderildiğinde 400 "Bad Request: object expected as reply markup" döndürür — alan ya
+    /// geçerli bir obje olmalı ya da istekte hiç bulunmamalı. (Multipart yolları null'da alanı
+    /// zaten eklemiyor; bu ayar yalnız PostAsJsonAsync yollarını düzeltir.)
+    /// </summary>
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
     public async Task<PublishResult> PublishAsync(PublishRequest request, AccountCredentials credentials, CancellationToken ct)
     {
         if (!credentials.Values.TryGetValue("BotToken", out var token) || string.IsNullOrWhiteSpace(token))
@@ -73,7 +84,7 @@ internal sealed class TelegramPublisher(
                 // ("/media/x.png") "invalid file HTTP URL: URL host is empty" verir → bu dala GİRME,
                 // görselsiz metne düş (multipart bytes yolu zaten yukarıda; bu yalnız fallback).
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendPhoto",
-                    new { chat_id = request.TargetRef, photo = request.MediaUrl, caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
+                    new { chat_id = request.TargetRef, photo = request.MediaUrl, caption, parse_mode = "HTML", reply_markup = replyMarkup }, JsonOpts, ct);
             }
             else if (request.VideoMedia is { } vm)
             {
@@ -96,12 +107,12 @@ internal sealed class TelegramPublisher(
             {
                 // VİDEO — yerel dosya okunamadıysa public URL yedeği (Telegram kendisi indirir; limit 20 MB).
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendVideo",
-                    new { chat_id = request.TargetRef, video = request.VideoUrl, caption, parse_mode = "HTML", supports_streaming = true, reply_markup = replyMarkup }, ct);
+                    new { chat_id = request.TargetRef, video = request.VideoUrl, caption, parse_mode = "HTML", supports_streaming = true, reply_markup = replyMarkup }, JsonOpts, ct);
             }
             else
             {
                 response = await client.PostAsJsonAsync($"{baseUrl}/sendMessage",
-                    new { chat_id = request.TargetRef, text = caption, parse_mode = "HTML", reply_markup = replyMarkup }, ct);
+                    new { chat_id = request.TargetRef, text = caption, parse_mode = "HTML", reply_markup = replyMarkup }, JsonOpts, ct);
             }
 
             using (response)

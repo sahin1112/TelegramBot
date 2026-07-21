@@ -62,13 +62,36 @@ internal static class SourceEndpoints
         });
 
         // Test: bir kaynağı KAYDETMEDEN oku, ham öğeleri döndür (selector doğrulama vb.)
+        // Dış ağ hataları (DNS/timeout/erişilemeyen site) 500 yerine 502 + açıklayıcı mesajla döner —
+        // loglarda "İşlenmeyen hata: POST /api/v1/sources/test" yığınlarını ve 60-90 sn'lik 500'leri önler.
         g.MapPost("/test", async (TestSourceRequest req, IEnumerable<IFeedReader> readers, IClock clock, CancellationToken ct) =>
         {
             var reader = readers.FirstOrDefault(r => r.CanRead(req.Type));
             if (reader is null) return Results.BadRequest("Bu kaynak türü okunamıyor.");
             var probe = new Source(null, req.Type, req.Url, 15, req.Selector, null, clock);
-            var items = await reader.ReadAsync(probe, ct);
-            return Results.Ok(items.Take(10));
+            try
+            {
+                var items = await reader.ReadAsync(probe, ct);
+                return Results.Ok(items.Take(10));
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // istemci vazgeçti — normal akış
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Problem(
+                    title: "Kaynağa erişilemedi",
+                    detail: $"Kaynak adresine bağlanılamadı ({req.Url}): {ex.Message}",
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (TaskCanceledException)
+            {
+                return Results.Problem(
+                    title: "Kaynak zaman aşımı",
+                    detail: $"Kaynak belirlenen sürede yanıt vermedi ({req.Url}). Adresi ve sunucunun dış ağ erişimini kontrol edin.",
+                    statusCode: StatusCodes.Status504GatewayTimeout);
+            }
         });
 
         // Elle tetikle: tüm 'due' kaynakları tarar.

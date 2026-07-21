@@ -23,7 +23,9 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
             e.Property(x => x.Id).ValueGeneratedNever();   // Id domain'de (Guid.NewGuid) atanır; EF üretmez.
             e.Property(x => x.SourceHash).IsRequired().HasMaxLength(128);
             e.HasIndex(x => x.SourceHash).IsUnique();            // dedup
-            e.Property(x => x.CreatedByRef).IsRequired().HasMaxLength(200);
+            // 1000: aktör referansı normalde kısa ("ingestion:host") ama uzun kaynak adreslerine
+            // karşı güvenli pay. Eskiden 200'dü ve Google News RSS linkleri kolonu taşırıyordu.
+            e.Property(x => x.CreatedByRef).IsRequired().HasMaxLength(1000);
             e.Property(x => x.RawTitle).HasMaxLength(500);
             e.HasIndex(x => new { x.EditorialStatus, x.MediaStatus });
             e.Property(x => x.Origin).HasConversion<string>().HasMaxLength(32);
@@ -69,7 +71,7 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
             e.HasIndex(x => new { x.ContentItemId, x.CreatedAt });
             e.Property(x => x.Event).HasConversion<string>().HasMaxLength(24);
             e.Property(x => x.ActorType).HasConversion<string>().HasMaxLength(24);
-            e.Property(x => x.ActorRef).IsRequired().HasMaxLength(200);
+            e.Property(x => x.ActorRef).IsRequired().HasMaxLength(1000);   // bkz. CreatedByRef notu
             e.Property(x => x.Detail).HasMaxLength(1000);
         });
     }

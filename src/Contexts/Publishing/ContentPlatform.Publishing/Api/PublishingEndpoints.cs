@@ -71,18 +71,23 @@ internal static class PublishingEndpoints
             return Results.Ok(Dto(p));
         });
 
-        // Şimdi yayınla (planı geç, hemen gönder)
-        // İstek iptaline bağlanmaz (yukarıdaki retry ile aynı gerekçe): gönderim sonucu MUTLAKA kaydedilir.
-        g.MapPost("/publications/{id:guid}/publish-now", async (Guid id, IPublicationRepository repo, DistributionService dist, IClock clock) =>
+        // Şimdi yayınla — ARKA PLANA DEVRET, kullanıcıyı bekletme.
+        // Eskiden burada gönderim INLINE yapılıyordu (dist.PublishOneAsync await) → video işleme/
+        // yükleme yüzünden panel isteği dakikalarca (bazen ~2 saat) askıda kalıyordu.
+        // Artık: kaydı "hemen due" (Scheduled + ScheduledAt=now) yapıp ANINDA 202 döneriz.
+        // Gönderimi ≤1 dk içinde ScheduledDispatchJob (Worker; Worker kapalıysa Api yedek gönderici)
+        // atomik sahiplenip yapar. Başarısız olursa mevcut retry (5 deneme, artan gecikme) devreye girer.
+        g.MapPost("/publications/{id:guid}/publish-now", async (Guid id, IPublicationRepository repo, IClock clock, CancellationToken ct) =>
         {
-            var ct = CancellationToken.None;
             var p = await repo.GetAsync(id, ct);
             if (p is null) return Results.NotFound();
             if (p.Status == PublicationStatus.Published) return Results.Ok(new { message = "Zaten yayınlanmış." });
-            p.Reschedule(clock.UtcNow, clock);
-            var ok = await dist.PublishOneAsync(p, ct);
+            p.QueueNow(clock);                       // inline göndermez; arka plana alır
             await repo.SaveChangesAsync(ct);
-            return Results.Ok(new { published = ok, p.Attempts, p.Error });
+            return Results.Accepted(
+                $"/api/v1/publishing/publications/{id}",
+                new { queued = true, status = p.Status.ToString(),
+                      message = "Gönderim arka plana alındı; en geç 1 dakika içinde yayınlanacak." });
         });
 
         // Planı iptal et (bir daha gönderilmez)
