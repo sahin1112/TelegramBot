@@ -20,9 +20,11 @@ public sealed class PublishingModule : IModule
     public void Register(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<OpenAiOptions>(configuration.GetSection("OpenAI"));
+        // OpenAI metin isteklerini süreç genelinde sıraya sokan tek kapı (SINGLETON) — atak/burst koruması.
+        services.AddSingleton<Infrastructure.OpenAi.AiTextThrottle>();
 
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
         services.AddDbContext<PublishingDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", PublishingDbContext.Schema)));
         services.AddScoped<IStartupMigrator, PublishingMigrator>();
@@ -66,6 +68,8 @@ public sealed class PublishingModule : IModule
 
         // Yayına-hazır içeriği hedeflere dağıtan handler.
         services.AddScoped<IIntegrationEventHandler<ContentReadyToPublishIntegrationEvent>, ContentReadyToPublishHandler>();
+        // İçerik silinince bekleyen/planlı yayınları iptal et.
+        services.AddScoped<IIntegrationEventHandler<ContentRetractedIntegrationEvent>, ContentRetractedPublishingHandler>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints) => PublishingEndpoints.Map(endpoints);

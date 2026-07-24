@@ -390,13 +390,7 @@ internal sealed class SkiaCardRenderer(IOptions<SiteOptions> siteOptions, IClock
     }
 
     private static SKFont MakeFont(float size, SKFontStyleWeight weight)
-    {
-        var typeface =
-            SKTypeface.FromFamilyName("Segoe UI", weight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
-            ?? SKTypeface.FromFamilyName("Arial", weight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
-            ?? SKTypeface.Default;
-        return new SKFont(typeface, size) { Subpixel = true };
-    }
+        => new(Fonts.Get(weight), size) { Subpixel = true }; // gömülü Montserrat (bkz. Fonts.cs)
 
     private static string Ellipsize(string line, SKFont font, float maxWidth)
     {
@@ -425,4 +419,224 @@ internal sealed class SkiaCardRenderer(IOptions<SiteOptions> siteOptions, IClock
         if (current.Length > 0) lines.Add(current);
         return lines.Count > 0 ? lines : new List<string> { text };
     }
+
+    // ==================== ŞABLON ÜZERİNE BİNDİRME (otomatik alan + adaptif renk + rozet) ====================
+
+    public byte[] RenderOnTemplate(byte[] templateBytes, string title, string? badgeText, bool badgeAmber, string? category, int width, int height)
+    {
+        if (width <= 0) width = 1080;
+        if (height <= 0) height = 1080;
+        var s = MathF.Min(width, height) / 1080f;
+        title = string.IsNullOrWhiteSpace(title) ? "Başlık" : title.Trim();
+
+        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        var canvas = surface.Canvas;
+
+        // 1) Şablonu cover-crop çiz (çözülemezse koyu zemin)
+        var decoded = SKBitmap.Decode(templateBytes);
+        try
+        {
+            if (decoded is null) canvas.Clear(new SKColor(0x11, 0x14, 0x1A));
+            else
+            {
+                var sc = MathF.Max((float)width / decoded.Width, (float)height / decoded.Height);
+                var dw = decoded.Width * sc; var dh = decoded.Height * sc;
+                var dst = new SKRect((width - dw) / 2f, (height - dh) / 2f, (width + dw) / 2f, (height + dh) / 2f);
+                using var img = SKImage.FromBitmap(decoded);
+                using var bp = new SKPaint { IsAntialias = true };
+                canvas.DrawImage(img, dst, new SKSamplingOptions(SKCubicResampler.Mitchell), bp);
+            }
+        }
+        finally { decoded?.Dispose(); }
+
+        // 2) Kompoze görselden küçük gri + busyness (integral) haritaları — otomatik alan/renk için
+        var aw = 180;
+        var ah = Math.Max(1, (int)Math.Round((double)height / width * aw));
+        var (busyI, lumI) = AnalyzeSurface(surface, aw, ah);
+
+        // 3) Üst (kategori) rezervi + en boş metin kutusu
+        var hasCat = !string.IsNullOrWhiteSpace(category);
+        var hasBadge = !string.IsNullOrWhiteSpace(badgeText);
+        var top = 60f * s;
+        var catPillH = 34f * s + 14f * s * 2f;
+        var reservedTop = top + (hasCat ? catPillH + 20f * s : 0f);
+
+        var (boxX0, boxY0, boxX1, boxY1) = FindTextZone(width, height, busyI, aw, ah, reservedTop);
+        var boxW = boxX1 - boxX0; var boxH = boxY1 - boxY0;
+
+        var badgeStrip = hasBadge ? 96f * s : 0f;
+        var textAreaH = boxH - badgeStrip;
+
+        // 4) Başlığı sığdır (Montserrat ExtraBold) — satır satır adaptif renk + zıt renkli hafif kontur
+        var padX = 46f * s;
+        var maxWidth = boxW - padX * 2f;
+        var pad = 18f * s;
+        List<string> lines = new(); SKFont? font = null; float lineHeight = 0;
+        foreach (var size in new[] { 86f, 80f, 74f, 68f, 62f, 56f, 50f, 46f, 42f })
+        {
+            font?.Dispose();
+            font = MakeFont(size * s, SKFontStyleWeight.ExtraBold);
+            lines = WrapText(title, font, maxWidth);
+            lineHeight = font.Size * 1.16f;
+            if (lines.Count * lineHeight <= textAreaH - 2f * pad) break;
+        }
+        var maxLines = Math.Max(1, (int)((textAreaH - 2f * pad) / lineHeight));
+        if (lines.Count > maxLines) { lines = lines.Take(maxLines).ToList(); lines[^1] = Ellipsize(lines[^1], font!, maxWidth); }
+
+        var blockH = lines.Count * lineHeight;
+        var textTop = boxY0 + (textAreaH - blockH) / 2f;
+        var textX = boxX0 + padX;
+        var strokeW = MathF.Max(2f, font!.Size * 0.035f);
+        var baseline = textTop + font.Size;
+        foreach (var line in lines)
+        {
+            var lw = font.MeasureText(line);
+            var ll = RegionMean(lumI, aw, ah, width, height, textX, baseline - font.Size, lw, lineHeight);
+            var dark = ll < 150f;
+            var fill = dark ? new SKColor(0xFF, 0xFF, 0xFF) : new SKColor(0x11, 0x14, 0x1A);
+            var halo = dark ? SKColors.Black.WithAlpha(0x66) : SKColors.White.WithAlpha(0x82);
+            using (var hp = new SKPaint { IsAntialias = true, Color = halo, Style = SKPaintStyle.Stroke, StrokeWidth = strokeW, StrokeJoin = SKStrokeJoin.Round })
+                canvas.DrawText(line, textX, baseline, font, hp);
+            using (var tp = new SKPaint { IsAntialias = true, Color = fill })
+                canvas.DrawText(line, textX, baseline, font, tp);
+            baseline += lineHeight;
+        }
+        font.Dispose();
+
+        // 5) Kategori etiketi (sol üst, küçük, turuncu gradyan)
+        if (hasCat)
+        {
+            var cat = category!.Trim().ToUpper(System.Globalization.CultureInfo.GetCultureInfo("tr-TR"));
+            using var cf = MakeFont(34f * s, SKFontStyleWeight.SemiBold);
+            DrawPill(canvas, 64f * s, top, cat, cf, C(0xF26D21), C(0xE63B2E), glow: null,
+                textCol: new SKColor(0xFF, 0xFF, 0xFF), padX: 26f * s, padY: 14f * s, radius: 12f * s, centerX: null);
+        }
+
+        // 6) Dikkat rozeti (başlığın ALTINDA ORTADA, premium: gradyan + ışıma)
+        if (hasBadge)
+        {
+            var bText = badgeText!.Trim().ToUpper(System.Globalization.CultureInfo.GetCultureInfo("tr-TR"));
+            using var bf = MakeFont(48f * s, SKFontStyleWeight.ExtraBold);
+            var (g1, g2, glow) = badgeAmber
+                ? (C(0xE08A12), C(0xF5A524), C(0xF5A524))
+                : (C(0xC61824), C(0xF03A32), C(0xE41E2C));
+            var by = boxY0 + textAreaH + 6f * s;
+            DrawPill(canvas, 0f, by, bText, bf, g1, g2, glow: glow.WithAlpha(0xAA),
+                textCol: new SKColor(0xFF, 0xFF, 0xFF), padX: 38f * s, padY: 18f * s, radius: 16f * s, centerX: width / 2f);
+        }
+
+        using var image = surface.Snapshot();
+        using var data = image.Encode(SKEncodedImageFormat.Png, 92);
+        return data.ToArray();
+    }
+
+    /// <summary>Kompoze yüzeyden küçük gri + busyness'in integral görüntülerini üretir (otomatik alan/renk analizi).</summary>
+    private static (float[] BusyIntegral, float[] LumIntegral) AnalyzeSurface(SKSurface surface, int aw, int ah)
+    {
+        using var snap = surface.Snapshot();
+        using var small = new SKBitmap(new SKImageInfo(aw, ah, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var c2 = new SKCanvas(small))
+        {
+            c2.Clear(SKColors.Black);
+            c2.DrawImage(snap, new SKRect(0, 0, aw, ah), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+        }
+        var lum = new float[aw * ah];
+        for (var y = 0; y < ah; y++)
+            for (var x = 0; x < aw; x++)
+            {
+                var p = small.GetPixel(x, y);
+                lum[y * aw + x] = 0.299f * p.Red + 0.587f * p.Green + 0.114f * p.Blue;
+            }
+        var busy = new float[aw * ah];
+        for (var y = 0; y < ah; y++)
+            for (var x = 0; x < aw; x++)
+            {
+                var c = lum[y * aw + x];
+                var dx = x > 0 ? MathF.Abs(c - lum[y * aw + x - 1]) : 0f;
+                var dy = y > 0 ? MathF.Abs(c - lum[(y - 1) * aw + x]) : 0f;
+                busy[y * aw + x] = dx + dy;
+            }
+        return (Integral(busy, aw, ah), Integral(lum, aw, ah));
+    }
+
+    private static float[] Integral(float[] a, int w, int h)
+    {
+        var integral = new float[(w + 1) * (h + 1)];
+        for (var y = 1; y <= h; y++)
+        {
+            float row = 0;
+            for (var x = 1; x <= w; x++)
+            {
+                row += a[(y - 1) * w + x - 1];
+                integral[y * (w + 1) + x] = integral[(y - 1) * (w + 1) + x] + row;
+            }
+        }
+        return integral;
+    }
+
+    private static float BoxMean(float[] integral, int aw, int ah, int ax0, int ay0, int ax1, int ay1)
+    {
+        ax0 = Math.Clamp(ax0, 0, aw); ax1 = Math.Clamp(ax1, 0, aw);
+        ay0 = Math.Clamp(ay0, 0, ah); ay1 = Math.Clamp(ay1, 0, ah);
+        if (ax1 <= ax0 || ay1 <= ay0) return 128f;
+        var st = aw + 1;
+        var area = (ax1 - ax0) * (ay1 - ay0);
+        return (integral[ay1 * st + ax1] - integral[ay0 * st + ax1] - integral[ay1 * st + ax0] + integral[ay0 * st + ax0]) / area;
+    }
+
+    /// <summary>Tam-çözünürlük bir dikdörtgenin analiz haritasındaki ortalama değeri (busyness ya da luminance).</summary>
+    private static float RegionMean(float[] integral, int aw, int ah, int w, int h, float fx0, float fy0, float fw, float fh)
+        => BoxMean(integral, aw, ah,
+            (int)(fx0 * aw / w), (int)(fy0 * ah / h),
+            (int)MathF.Ceiling((fx0 + fw) * aw / w), (int)MathF.Ceiling((fy0 + fh) * ah / h));
+
+    /// <summary>En boş (düşük busyness) dikdörtgeni bulur; sağ-alt filigran cezalı, üst hafif tercihli.</summary>
+    private static (float X0, float Y0, float X1, float Y1) FindTextZone(int w, int h, float[] busyI, int aw, int ah, float yMin)
+    {
+        var bw = w * 0.86f;
+        var bh = h * (h <= w ? 0.42f : 0.32f);
+        var mx = w * 0.06f;
+        var xs = new[] { mx, (w - bw) / 2f, w - bw - mx };
+        var yLo = MathF.Max(h * 0.06f, yMin);
+        var yHi = MathF.Max(yLo, h - bh - h * 0.08f);
+        var bestScore = float.MaxValue; float bx = mx, by = yLo;
+        for (var i = 0; i < 14; i++)
+        {
+            var y0 = yLo + (yHi - yLo) * (i / 13f);
+            foreach (var x0 in xs)
+            {
+                if (x0 < 0f || x0 > w - bw) continue;
+                var score = RegionMean(busyI, aw, ah, w, h, x0, y0, bw, bh);
+                if (x0 + bw > w * 0.55f && y0 + bh > h * 0.90f) score += 40f; // filigran (sağ-alt) cezası
+                score += (y0 / h) * 3f;                                        // üst tercih
+                if (score < bestScore) { bestScore = score; bx = x0; by = y0; }
+            }
+        }
+        return (bx, by, bx + bw, by + bh);
+    }
+
+    /// <summary>Yuvarlak etiket (pill): gradyan dolgu + opsiyonel ışıma; sola hizalı (centerX=null) ya da ortalı.</summary>
+    private void DrawPill(SKCanvas canvas, float x, float y, string text, SKFont font, SKColor g1, SKColor g2, SKColor? glow, SKColor textCol, float padX, float padY, float radius, float? centerX)
+    {
+        var tw = font.MeasureText(text);
+        var w = tw + padX * 2f;
+        var hgt = font.Size + padY * 2f;
+        var left = centerX is { } cx ? cx - w / 2f : x;
+        var rect = new SKRect(left, y, left + w, y + hgt);
+        if (glow is { } gl)
+        {
+            using var gp = new SKPaint { IsAntialias = true, Color = gl };
+            gp.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 18f);
+            canvas.DrawRoundRect(rect, radius, radius, gp);
+        }
+        using (var fill = new SKPaint { IsAntialias = true })
+        {
+            fill.Shader = SKShader.CreateLinearGradient(new SKPoint(rect.Left, rect.Top), new SKPoint(rect.Right, rect.Bottom),
+                new[] { g1, g2 }, null, SKShaderTileMode.Clamp);
+            canvas.DrawRoundRect(rect, radius, radius, fill);
+        }
+        using var tp = new SKPaint { IsAntialias = true, Color = textCol };
+        canvas.DrawText(text, rect.Left + padX, rect.MidY + font.Size * 0.36f, font, tp);
+    }
+
 }

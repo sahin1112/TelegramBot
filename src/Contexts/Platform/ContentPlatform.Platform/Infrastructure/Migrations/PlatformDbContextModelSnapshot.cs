@@ -26,11 +26,33 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Platform.Domain.Category", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("AdEveryNPosts")
                         .HasColumnType("int");
+
+                    b.Property<bool>("AttentionBadges")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoContent")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoImage")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoPublish")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoVideo")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Card1x1")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CardReels")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -94,7 +116,6 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Platform.Domain.KillSwitch", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -131,7 +152,6 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Platform.Domain.PublicationTarget", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("CategoryId")
@@ -195,12 +215,12 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ShowOnHome", "IsActive");
+
                     b.HasIndex("SocialAccountId", "ExternalTargetId")
                         .IsUnique();
 
                     b.HasIndex("Platform", "Role", "IsActive");
-
-                    b.HasIndex("ShowOnHome", "IsActive");
 
                     b.ToTable("publication_targets", "platform");
                 });
@@ -208,7 +228,6 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Platform.Domain.SocialAccount", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -258,7 +277,6 @@ namespace ContentPlatform.Platform.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Platform.Domain.SystemSetting", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")

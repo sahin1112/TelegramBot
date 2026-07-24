@@ -19,7 +19,7 @@ public sealed class SiteModule : IModule
     public void Register(IServiceCollection services, IConfiguration configuration)
     {
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
 
         services.AddDbContext<SiteDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", SiteDbContext.Schema)));
@@ -31,6 +31,8 @@ public sealed class SiteModule : IModule
         services.AddScoped<CommentService>();
         services.AddScoped<NewsletterService>();
         services.AddScoped<IIntegrationEventHandler<ContentReadyToPublishIntegrationEvent>, ContentReadyToPublishBlogHandler>();
+        // İçerik silinince blog gönderisini kaldır.
+        services.AddScoped<IIntegrationEventHandler<ContentRetractedIntegrationEvent>, ContentRetractedBlogHandler>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)

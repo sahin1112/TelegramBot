@@ -33,6 +33,14 @@ public sealed class EditorialDbContext(DbContextOptions<EditorialDbContext> opti
             e.Property(x => x.RiskLevel).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.EditorialStatus).HasConversion<string>().HasMaxLength(24);
             e.Property(x => x.MediaStatus).HasConversion<string>().HasMaxLength(24);
+            // Otomatik üretim adım durumları (metin/görsel/video) — okunabilirlik için string.
+            e.Property(x => x.ContentGen).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.ImageGen).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.VideoGen).HasConversion<string>().HasMaxLength(16);
+            // Görsel şablon havuzu (virgüllü dosya adları) + rozet override.
+            e.Property(x => x.Card1x1Pool).HasMaxLength(2000);
+            e.Property(x => x.CardReelsPool).HasMaxLength(2000);
+            e.Property(x => x.BadgeOverride).HasMaxLength(40);
             e.HasMany(x => x.Revisions).WithOne().HasForeignKey(r => r.ContentItemId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(x => x.Revisions).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasMany(x => x.Media).WithOne().HasForeignKey(m => m.ContentItemId).OnDelete(DeleteBehavior.Cascade);

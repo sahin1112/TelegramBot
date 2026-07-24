@@ -18,7 +18,7 @@ public sealed class PlatformModule : IModule
     public void Register(IServiceCollection services, IConfiguration configuration)
     {
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
 
         services.AddDbContext<PlatformDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", PlatformDbContext.Schema)));
@@ -63,6 +63,8 @@ public sealed class PlatformModule : IModule
         services.AddScoped<CategoryService>();
         // Public site (blog) için aktif kategori kataloğu — üst menü + /kategori/{slug} sayfaları.
         services.AddScoped<IPublicCategoryProvider, PublicCategoryProvider>();
+        // Kategori otomasyon ayarları (oto-içerik/görsel/video/yayınla) — Editorial (keşif) bunu çözer.
+        services.AddScoped<ICategoryAutomationProvider, CategoryAutomationProvider>();
         // Ana sayfa sosyal şeridi — "Sosyal Hesaplar"da 'ana sayfada yayınla' seçili hedeflerden.
         services.AddScoped<IPublicSocialProvider, PublicSocialProvider>();
 

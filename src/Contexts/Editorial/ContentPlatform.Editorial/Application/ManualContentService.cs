@@ -1,11 +1,26 @@
+using ContentPlatform.Abstractions;
 using ContentPlatform.Editorial.Domain;
 using ContentPlatform.SharedKernel;
 
 namespace ContentPlatform.Editorial.Application;
 
 /// <summary>Panelden manuel içerik ekleme — AI'lı (taslak ürettir) ve AI'sız (bitmiş metin).</summary>
-public sealed class ManualContentService(IContentRepository repository, IRiskClassifier riskClassifier, IContentAudit audit, IClock clock)
+public sealed class ManualContentService(
+    IContentRepository repository,
+    IRiskClassifier riskClassifier,
+    IContentAudit audit,
+    ICategoryAutomationProvider categoryAutomation,
+    IClock clock)
 {
+    /// <summary>Kategorinin görsel şablon havuzunu (ve rozet ayarını) içeriğe uygular.</summary>
+    private async Task ApplyCardsAsync(ContentItem item, CancellationToken ct)
+    {
+        if (item.CategoryId is not { } cid) return;
+        var cat = await categoryAutomation.GetAsync(cid, ct);
+        if (cat is null) return;
+        item.ConfigureCards(cat.Card1x1, cat.CardReels, cat.AttentionBadges, clock);
+    }
+
     /// <summary>AI'lı: metni yapıştır → otomatik onaylı → PipelineDrainJob AI ile üretir.</summary>
     public async Task<Guid> AddWithAiAsync(AddManualAiRequest req, CancellationToken ct)
     {
@@ -15,17 +30,14 @@ public sealed class ManualContentService(IContentRepository repository, IRiskCla
             rawTitle: req.Title, rawInput: req.RawInput,
             ActorType.AdminUser, createdByRef: "admin", clock);
         item.Schedule(req.ScheduledAt, clock);
+        await ApplyCardsAsync(item, ct);
         await repository.AddAsync(item, ct);
         audit.Log(item.Id, AuditEvent.Created, ActorType.AdminUser, "admin", "Manuel (AI'lı)");
         await repository.SaveChangesAsync(ct);
         return item.Id;
     }
 
-    /// <summary>
-    /// AI'lı ama ÖNİZLEME/gözden geçirme için: içeriği PendingReview olarak oluşturur (otomatik yayınlanmaz).
-    /// Endpoint bunu oluşturup hemen GenerateDraftAsync ile doldurur → kullanıcı önizler/düzenler/onaylar.
-    /// Aynı motor Telegram admin kanalı (D1) için de kullanılacak.
-    /// </summary>
+    /// <summary>AI'lı ama ÖNİZLEME/gözden geçirme için: PendingReview olarak oluşturur.</summary>
     public async Task<Guid> AddForReviewAsync(AddManualAiRequest req, CancellationToken ct)
     {
         var item = new ContentItem(
@@ -33,15 +45,16 @@ public sealed class ManualContentService(IContentRepository repository, IRiskCla
             req.CategoryId, req.TestMode, NewHash(), sourceUrl: null,
             rawTitle: req.Title, rawInput: req.RawInput,
             ActorType.AdminUser, createdByRef: "admin", clock);
-        item.ReturnToReview(clock);          // otomatik onaylı olmasın → önce üret + gözden geçir
+        item.ReturnToReview(clock);
         item.Schedule(req.ScheduledAt, clock);
+        await ApplyCardsAsync(item, ct);
         await repository.AddAsync(item, ct);
         audit.Log(item.Id, AuditEvent.Created, ActorType.AdminUser, "admin", "Manuel (AI, önizleme)");
         await repository.SaveChangesAsync(ct);
         return item.Id;
     }
 
-    /// <summary>AI'sız: bitmiş metni doğrudan → revizyon oluşturulur → görsel + yayına girer (AI yok).</summary>
+    /// <summary>AI'sız: bitmiş metni doğrudan → revizyon oluşturulur → görsel + yayına girer.</summary>
     public async Task<Guid> AddWithoutAiAsync(AddManualNoAiRequest req, CancellationToken ct)
     {
         var item = new ContentItem(
@@ -54,6 +67,7 @@ public sealed class ManualContentService(IContentRepository repository, IRiskCla
             item.Id, 1, req.Title, req.ShortX, req.BodyHtml, req.InstagramCaption,
             req.Tags, req.PrimaryKeyword, req.ImageAltText, createdBy: "admin", clock));
         item.Schedule(req.ScheduledAt, clock);
+        await ApplyCardsAsync(item, ct);
 
         await repository.AddAsync(item, ct);
         audit.Log(item.Id, AuditEvent.Created, ActorType.AdminUser, "admin", "Manuel (AI'sız, bitmiş metin)");
@@ -61,11 +75,7 @@ public sealed class ManualContentService(IContentRepository repository, IRiskCla
         return item.Id;
     }
 
-    /// <summary>
-    /// Telegram admin grubundan LİNK ile içerik: /kategori https://... → içerik TASLAK oluşturulur
-    /// (Origin=TelegramAdmin), SourceUrl'den TAM makale metni çekilip AI üretimi yapılır (çağıran
-    /// GenerateDraftAsync + SubmitForReview'i tamamlar) → ONAY kuyruğuna düşer; otomatik yayınlanmaz.
-    /// </summary>
+    /// <summary>Telegram admin grubundan LİNK ile içerik → TASLAK (Origin=TelegramAdmin).</summary>
     public async Task<Guid> AddFromLinkForReviewAsync(string url, Guid? categoryId, string createdByRef, CancellationToken ct)
     {
         var item = new ContentItem(
@@ -73,6 +83,7 @@ public sealed class ManualContentService(IContentRepository repository, IRiskCla
             riskClassifier.Classify(null, url), categoryId, testMode: false,
             NewHash(), sourceUrl: url, rawTitle: null, rawInput: null,
             ActorType.TelegramMember, createdByRef, clock);
+        await ApplyCardsAsync(item, ct);
         await repository.AddAsync(item, ct);
         audit.Log(item.Id, AuditEvent.Created, ActorType.TelegramMember, createdByRef, "Telegram admin komutu (link)");
         await repository.SaveChangesAsync(ct);

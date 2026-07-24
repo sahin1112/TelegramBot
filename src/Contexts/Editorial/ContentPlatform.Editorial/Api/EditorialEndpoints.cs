@@ -1,5 +1,6 @@
 using ContentPlatform.Abstractions;
 using ContentPlatform.Editorial.Application;
+using ContentPlatform.Editorial.Contracts;
 using ContentPlatform.Editorial.Domain;
 using ContentPlatform.SharedKernel;
 using Microsoft.AspNetCore.Builder;
@@ -198,6 +199,69 @@ internal static class EditorialEndpoints
             return Results.Ok();
         });
 
+        // ---- Sil (arşivle + siteden ve yayın akışından kaldır) ----
+        // İçerik Archived olur (kayıt/iz kalır ama panelde aktif listelerde görünmez, üretim almaz);
+        // ContentRetracted olayı ile Site blog gönderisini SİLER, Publishing bekleyen/planlı yayınları İPTAL eder.
+        // Gönderilmiş sosyal paylaşımlar platform API kısıtları nedeniyle geri alınmaz.
+        g.MapDelete("/{id:guid}", async (Guid id, IContentRepository repo, IContentAudit audit, IIntegrationEventPublisher bus, IClock clock, CancellationToken ct) =>
+        {
+            var item = await repo.GetAsync(id, ct);
+            if (item is null) return Results.NotFound();
+            item.Archive(clock);
+            audit.Log(id, Domain.AuditEvent.Retracted, Domain.ActorType.AdminUser, "admin", "Silindi (siteden/yayından kaldırıldı)");
+            await repo.SaveChangesAsync(ct);
+            // Dağıtım/temizlik istek iptaline BAĞLANMAZ — silme tamamlanmalı.
+            await bus.PublishAsync(new ContentRetractedIntegrationEvent(Guid.NewGuid(), clock.UtcNow, id), CancellationToken.None);
+            return Results.Ok();
+        });
+
+        // ---- Toplu sil (seçilenleri arşivle + siteden/yayından kaldır) ----
+        g.MapPost("/bulk-delete", async (BulkDeleteRequest req, IContentRepository repo, IContentAudit audit, IIntegrationEventPublisher bus, IClock clock, CancellationToken ct) =>
+        {
+            var done = new List<Guid>();
+            foreach (var id in req.Ids ?? Array.Empty<Guid>())
+            {
+                var item = await repo.GetAsync(id, ct);
+                if (item is null) continue;
+                item.Archive(clock);
+                audit.Log(id, Domain.AuditEvent.Retracted, Domain.ActorType.AdminUser, "admin", "Toplu silindi");
+                done.Add(id);
+            }
+            await repo.SaveChangesAsync(ct);
+            foreach (var id in done)
+                await bus.PublishAsync(new ContentRetractedIntegrationEvent(Guid.NewGuid(), clock.UtcNow, id), CancellationToken.None);
+            return Results.Ok(new { deleted = done.Count });
+        });
+
+        // ---- Elle dikkat rozeti (null=otomatik, ""=yok, "SON DAKİKA"/"ŞOK"=zorla) ----
+        g.MapPost("/{id:guid}/badge", async (Guid id, BadgeRequest req, IContentRepository repo, IClock clock, CancellationToken ct) =>
+        {
+            var item = await repo.GetAsync(id, ct);
+            if (item is null) return Results.NotFound();
+            item.SetBadgeOverride(req.Badge, clock);
+            await repo.SaveChangesAsync(ct);
+            return Results.Ok(new { item.BadgeOverride });
+        });
+
+        // ---- Görsel şablon kütüphanesi listesi (panel çoklu seçim) ----
+        app.MapGet("/api/v1/assets/cards", (string? kind, ICardAssetLibrary lib) =>
+            Results.Ok(lib.List(string.Equals(kind, "reels", StringComparison.OrdinalIgnoreCase) ? "reels" : "1x1")))
+            .ExcludeFromDescription();
+
+        // ---- Şablon ÖNİZLEME thumbnail'i (herkese açık; panel <img> için, /api/v1 dışı = auth yok) ----
+        app.MapGet("/assets/thumb/{kind}/{name}", (string kind, string name, ICardAssetLibrary lib) =>
+        {
+            var bytes = lib.Read(kind, name);
+            if (bytes is null) return Results.NotFound();
+            using var bmp = SkiaSharp.SKBitmap.Decode(bytes);
+            if (bmp is null) return Results.NotFound();
+            var tw = 260; var th = Math.Max(1, (int)(bmp.Height * (tw / (float)bmp.Width)));
+            using var small = bmp.Resize(new SkiaSharp.SKImageInfo(tw, th), new SkiaSharp.SKSamplingOptions(SkiaSharp.SKFilterMode.Linear)) ?? bmp;
+            using var img = SkiaSharp.SKImage.FromBitmap(small);
+            using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 80);
+            return Results.File(data.ToArray(), "image/jpeg");
+        }).ExcludeFromDescription();
+
         // ---- Manuel içerik ekle (AI'lı → taslak ürettir) ----
         g.MapPost("/manual", async (AddManualAiRequest req, ManualContentService svc, CancellationToken ct) =>
             Results.Created($"/api/v1/editorial/{await svc.AddWithAiAsync(req, ct)}", null));
@@ -271,18 +335,25 @@ internal static class EditorialEndpoints
         i.Revisions.FirstOrDefault(r => r.IsCurrent)?.Title ?? i.RawTitle;
 
     private static ContentSummaryDto Summary(ContentItem i) => new(
-        i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, CurrentTitle(i), i.CategoryId, i.TestMode, i.CreatedAt);
+        i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, CurrentTitle(i), i.CategoryId, i.TestMode, i.CreatedAt,
+        HasContent: i.Revisions.Any(r => r.IsCurrent),
+        HasImage: i.Media.Any(m => m.Kind != Domain.MediaKind.Video),
+        HasVideo: i.Media.Any(m => m.Kind == Domain.MediaKind.Video),
+        ContentGen: i.ContentGen.ToString(), ImageGen: i.ImageGen.ToString(), VideoGen: i.VideoGen.ToString(),
+        AutoContent: i.AutoContent, AutoImage: i.AutoImage, AutoVideo: i.AutoVideo, AutoPublish: i.AutoPublish);
 
     private static ContentDetailDto Detail(ContentItem i)
     {
         var rev = i.Revisions.FirstOrDefault(r => r.IsCurrent);
         // ÜRETİM ZAMANINA göre en yenisi — EF koleksiyon sırası rastgele; sona eklenen AI görseli
         // listede önde kalıp önizlemede/yayında ESKİ SkiaCard görünüyordu.
-        var media = i.Media.Where(m => m.Kind != Domain.MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault();
+        var media = i.Media.Where(m => m.Kind != Domain.MediaKind.Video && m.Kind != Domain.MediaKind.Story).OrderBy(m => m.CreatedAt).LastOrDefault();
         var video = i.Media.Where(m => m.Kind == Domain.MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault();
+        var story = i.Media.Where(m => m.Kind == Domain.MediaKind.Story).OrderBy(m => m.CreatedAt).LastOrDefault();
         return new ContentDetailDto(
             i.Id, i.Origin, i.EditorialStatus, i.MediaStatus, i.RiskLevel, i.ImageSource, i.TestMode, i.CategoryId,
             rev?.Title ?? i.RawTitle, rev?.ShortX, rev?.BodyHtml, rev?.InstagramCaption,
-            rev?.Tags ?? new List<string>(), media?.Url, video?.Url, i.CreatedAt, i.ScheduledAt, i.PublishedAt, i.Error, i.RawInput);
+            rev?.Tags ?? new List<string>(), media?.Url, video?.Url, i.CreatedAt, i.ScheduledAt, i.PublishedAt, i.Error, i.RawInput,
+            story?.Url, i.BadgeOverride);
     }
 }

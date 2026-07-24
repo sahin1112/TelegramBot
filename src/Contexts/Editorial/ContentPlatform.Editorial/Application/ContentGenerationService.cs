@@ -22,6 +22,7 @@ public sealed class ContentGenerationService(
     ITextGenerationProvider textProvider,
     IImageGenerationProvider imageProvider,
     ICardRenderer cardRenderer,
+    ICardAssetLibrary cardAssets,
     ISlideVideoRenderer videoRenderer,
     IMediaStore mediaStore,
     IMediaReader mediaReader,
@@ -31,6 +32,7 @@ public sealed class ContentGenerationService(
     IContentAudit audit,
     IArticleTextExtractor articleExtractor,
     IPublicCategoryProvider categoryProvider,
+    ICategoryAutomationProvider categoryAutomation,
     IKillSwitch killSwitch,
     IClock clock,
     IOptions<SiteOptions> siteOptions,
@@ -113,15 +115,32 @@ public sealed class ContentGenerationService(
                 }
                 else
                 {
-                    var (url, kind, w, h) = await BuildImageAsync(item.ImageSource, f.Title, null, ct);
-                    item.AddMedia(kind, url, w, h, titleBurned: kind == MediaKind.SkiaCard, clock);
+                    if (item.ImageSource == ImageSource.SkiaCard)
+                    {
+                        var (cw, ch) = CardSize();
+                        var (u, k) = await BuildCardImageAsync(item, f.Title, "1x1", asStory: false, cw, ch, ct);
+                        item.AddMedia(k, u, cw, ch, titleBurned: true, clock);
+                        mediaUrl = u;
+                    }
+                    else
+                    {
+                        var (url, kind, w, h) = await BuildImageAsync(item.ImageSource, f.Title, null, ct);
+                        item.AddMedia(kind, url, w, h, titleBurned: kind == MediaKind.SkiaCard, clock);
+                        mediaUrl = url;
+                    }
                     item.MarkMediaReady(clock);
-                    mediaUrl = url;
+                    await EnsureStoryAsync(item, f.Title, ct);
                 }
                 await repository.SaveChangesAsync(ct);
 
                 await MaybePublishAsync(item, f, mediaUrl, ct);
                 produced++;
+            }
+            catch (AiQuotaExceededException)
+            {
+                // Kota tükendi (kalıcı): içeriği incelemeye ALMA — bu turu durdur, kota açılınca sonraki turda üretilir.
+                logger.LogWarning("AI kotası tükendi — bu tur üretim durduruluyor, sonra denenecek.");
+                break;
             }
             catch (Exception ex)
             {
@@ -135,6 +154,178 @@ public sealed class ContentGenerationService(
         if (produced > 0) logger.LogInformation("{Count} icerik uretildi ve yayina hazir.", produced);
         return produced;
     }
+
+    /// <summary>
+    /// TASLAK bir içeriği (RSS otomasyonuyla işaretlenmiş) otomatik hazırlar: metin → görsel (rastgele SkiaCard)
+    /// → video (SkiaCard slayt). Her adım BAĞIMSIZ; birinin hatası diğerini engellemez. Adım başarısızsa deneme
+    /// sayacı artar; MaxAutoAttempts (3) denemede olmazsa adım kalıcı "üretilemedi" (Failed) işaretlenir.
+    /// AutoPublish açık VE istenen adımlar sonuçlanmış + metin/görsel hazırsa içerik otomatik onaylanıp yayına
+    /// gönderilir; değilse taslakta bekler. Her içerik AYRI scope (DbContext) ile çağrılmalı → paralel çalışır.
+    /// </summary>
+    public async Task<bool> ProcessAutoDraftAsync(Guid id, CancellationToken ct)
+    {
+        var item = await repository.GetAsync(id, ct);
+        if (item is null || item.EditorialStatus != EditorialStatus.Draft) return false;
+
+        // Acil durdurma: AI (global ya da kategori) durdurulmuşsa dokunma — içerik sırada bekler.
+        if (await killSwitch.IsAiStoppedAsync(null, ct)) return false;
+        if (item.CategoryId is { } catStop && await killSwitch.IsAiStoppedAsync(catStop, ct)) return false;
+
+        var changed = false;
+
+        // 1) METİN (tüm alanlar) — istendi + henüz sonuçlanmadıysa
+        if (item.AutoContent && item.ContentGen == GenStepStatus.None)
+        {
+            if (item.Revisions.Any(r => r.IsCurrent))
+            {
+                item.MarkContentGenerated(clock); // zaten metin var (elle üretilmiş) → tamam say
+            }
+            else
+            {
+                try
+                {
+                    var input = await BuildAiInputAsync(item, ct);
+                    var f = await RunTextAsync(input, item.RawTitle, allowPartial: true, ct);
+                    var nextNo = (item.Revisions.Count == 0 ? 0 : item.Revisions.Max(r => r.RevisionNumber)) + 1;
+                    item.AddRevision(new ContentRevision(item.Id, nextNo, f.Title, f.ShortX, f.BodyHtml,
+                        f.InstagramCaption, f.Tags.ToList(), f.PrimaryKeyword, f.ImageAltText, createdBy: "ai-auto", clock));
+                    item.MarkContentGenerated(clock);
+                    audit.Log(item.Id, AuditEvent.Generated, ActorType.System, "ai-auto", "Otomatik metin üretildi");
+                }
+                catch (AiQuotaExceededException ex)
+                {
+                    // KALICI kota hatası: DENEME HAKKI YAKMA — kota/bakiye açılınca (throttle cooldown) sonraki turda denenir.
+                    logger.LogWarning("Otomatik metin: OpenAI kotası tükendi — deneme yakılmadı, sonra denenecek: {Id}. {Msg}", item.Id, ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Otomatik metin başarısız (deneme {N}): {Id}", item.ContentAttempts + 1, item.Id);
+                    item.RegisterContentFailure(clock);
+                }
+            }
+            await repository.SaveChangesAsync(ct);
+            changed = true;
+        }
+
+        var rev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
+
+        // 2) GÖRSEL — METNE GÖRE üretilir: METİN HAZIR OLMADAN (güncel revizyon yoksa) görsel ÜRETİLMEZ.
+        // Boş/gereksiz başlık kartı basılmasın; görsel her zaman üretilmiş metnin başlığından oluşur.
+        if (item.AutoImage && item.ImageGen == GenStepStatus.None)
+        {
+            if (LatestImageUrl(item) is not null)
+            {
+                item.MarkImageGenerated(clock); // zaten görsel var
+                await repository.SaveChangesAsync(ct);
+                changed = true;
+            }
+            else if (rev is not null)
+            {
+                try
+                {
+                    var title = rev.Title; // metin hazır → gerçek başlıkla üret (RawTitle DEĞİL)
+                    var (cw, ch) = CardSize();
+                    var (url, kind) = await BuildCardImageAsync(item, title, "1x1", asStory: false, cw, ch, ct);
+                    item.AddMedia(kind, url, cw, ch, titleBurned: true, clock);
+                    item.MarkMediaReady(clock);
+                    await EnsureStoryAsync(item, title, ct); // IG hikayesi için 9:16 görsel
+                    item.MarkImageGenerated(clock);
+                    audit.Log(item.Id, AuditEvent.Generated, ActorType.System, "ai-auto", "Otomatik görsel + hikaye üretildi");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Otomatik görsel başarısız (deneme {N}): {Id}", item.ImageAttempts + 1, item.Id);
+                    item.RegisterImageFailure(clock);
+                }
+                await repository.SaveChangesAsync(ct);
+                changed = true;
+            }
+            else if (item.ContentGen == GenStepStatus.Failed)
+            {
+                // Metin kalıcı olarak üretilemedi → görsel de üretilemez (görsel metne göre oluşur); boşuna bekletme.
+                item.RegisterImageFailure(clock);
+                await repository.SaveChangesAsync(ct);
+                changed = true;
+            }
+            // else: metin henüz üretilmedi (bu tur) → görsel bir sonraki tura kalsın (metin bitince üretilir).
+        }
+
+        // 3) VİDEO — SkiaCard slayt (X metni gerekir)
+        if (item.AutoVideo && item.VideoGen == GenStepStatus.None)
+        {
+            if (item.Media.Any(m => m.Kind == MediaKind.Video))
+            {
+                item.MarkVideoGenerated(clock);
+                await repository.SaveChangesAsync(ct);
+                changed = true;
+            }
+            else if (rev is not null && !string.IsNullOrWhiteSpace(rev.ShortX))
+            {
+                try
+                {
+                    byte[]? music = null;
+                    var musicUrl = await settingsProvider.GetAsync("video.music_url", ct);
+                    if (!string.IsNullOrWhiteSpace(musicUrl))
+                        music = (await mediaReader.TryReadAsync(musicUrl!, ct))?.Bytes;
+
+                    string? category = null;
+                    if (item.CategoryId is { } catId)
+                        category = (await categoryProvider.GetActiveAsync(ct)).FirstOrDefault(c => c.Id == catId)?.Name;
+
+                    var bg = await ResolveReelsBgAsync(item, ct);
+                    var (vbadge, vamber) = await ResolveBadgeAsync(item, ct);
+                    var bytes = await videoRenderer.RenderSlidesVideoAsync(rev.Title, rev.ShortX, music, null, category, bg, vbadge, vamber, ct);
+                    var vurl = await mediaStore.SaveAsync(bytes, "video/mp4", ct);
+                    var o = mediaOptions.Value;
+                    item.AddMedia(MediaKind.Video, vurl, o.VideoWidth > 0 ? o.VideoWidth : 1080,
+                        o.VideoHeight > 0 ? o.VideoHeight : 1920, titleBurned: true, clock);
+                    item.MarkVideoGenerated(clock);
+                    audit.Log(item.Id, AuditEvent.Generated, ActorType.System, "ai-auto", "Otomatik video üretildi");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Otomatik video başarısız (deneme {N}): {Id}", item.VideoAttempts + 1, item.Id);
+                    item.RegisterVideoFailure(clock);
+                }
+                await repository.SaveChangesAsync(ct);
+                changed = true;
+            }
+            else if (item.ContentGen == GenStepStatus.Failed)
+            {
+                // Metin kalıcı olarak üretilemedi → video da mümkün değil; boşuna bekletme.
+                item.RegisterVideoFailure(clock);
+                await repository.SaveChangesAsync(ct);
+                changed = true;
+            }
+            // else: metin henüz üretilmedi (bu tur) → video bir sonraki tura kalsın.
+        }
+
+        // 4) OTOMATİK YAYINLA (opsiyonel) — istenen adımların HEPSİ sonuçlanmış + metin & görsel hazırsa
+        if (item.AutoPublish && item.EditorialStatus == EditorialStatus.Draft)
+        {
+            var curRev = item.Revisions.FirstOrDefault(r => r.IsCurrent);
+            var hasImage = LatestImageUrl(item) is not null;
+            var contentSettled = !item.AutoContent || item.ContentGen != GenStepStatus.None;
+            var imageSettled = !item.AutoImage || item.ImageGen != GenStepStatus.None;
+            var videoSettled = !item.AutoVideo || item.VideoGen != GenStepStatus.None;
+            if (curRev is not null && hasImage && contentSettled && imageSettled && videoSettled)
+            {
+                var approve = item.Approve("auto-publish", automated: true, clock); // yüksek risk → reddedilir, taslakta kalır
+                if (approve.IsSuccess)
+                {
+                    audit.Log(item.Id, AuditEvent.Approved, ActorType.System, "auto-publish", "Otomatik onay + yayın");
+                    await repository.SaveChangesAsync(ct);
+                    var f = new Fields(curRev.Title, curRev.ShortX, curRev.BodyHtml, curRev.InstagramCaption,
+                        curRev.Tags, curRev.PrimaryKeyword, curRev.ImageAltText);
+                    await MaybePublishAsync(item, f, LatestImageUrl(item), ct); // kadans + kalite kapısı
+                    changed = true;
+                }
+            }
+        }
+
+        return changed;
+    }
+
 
     /// <summary>"Ben yükleyeceğim" akışı: görsel elle yüklendi → hazır işaretle → yayına-hazır olayı.</summary>
     public async Task<Result> AttachManualImageAsync(Guid contentItemId, byte[] bytes, string contentType, CancellationToken ct)
@@ -173,6 +364,28 @@ public sealed class ContentGenerationService(
             item.MarkAwaitingManualImage(clock);
             await repository.SaveChangesAsync(ct);
             return Result.Success<string?>(null); // görsel elle yüklenecek
+        }
+
+        // SkiaCard: kategori/kaynak havuzunda şablon varsa ŞABLONA bindirilir (yoksa düz kart) + IG için 9:16 hikaye.
+        if (source == ImageSource.SkiaCard)
+        {
+            try
+            {
+                var t = item.Revisions.FirstOrDefault(r => r.IsCurrent)?.Title ?? item.RawTitle ?? "Başlık";
+                var (cw, ch) = CardSize();
+                var (u, k) = await BuildCardImageAsync(item, t, "1x1", asStory: false, cw, ch, ct);
+                item.AddMedia(k, u, cw, ch, titleBurned: true, clock);
+                item.MarkMediaReady(clock);
+                await EnsureStoryAsync(item, t, ct);
+                await repository.SaveChangesAsync(ct);
+                await PublishIfApprovedAsync(item, u, ct);
+                return Result.Success<string?>(u);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Önizleme (şablon) görseli üretilemedi: {Id}", contentItemId);
+                return Result.Failure<string?>(Error.Conflict("Görsel üretilemedi: " + ex.Message));
+            }
         }
 
         try
@@ -382,7 +595,8 @@ public sealed class ContentGenerationService(
         return bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
             Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, TestMode: false,
             f.Title, f.ShortX, f.BodyHtml, f.InstagramCaption, f.Tags.ToList(), f.PrimaryKeyword, mediaUrl,
-            Link: link, ScheduledAt: item.ScheduledAt, AdGate: adGate, VideoUrl: LatestVideoUrl(item)), ct);
+            Link: link, ScheduledAt: item.ScheduledAt, AdGate: adGate, VideoUrl: LatestVideoUrl(item),
+            StoryImageUrl: LatestStoryUrl(item)), ct);
     }
 
     /// <summary>
@@ -401,7 +615,8 @@ public sealed class ContentGenerationService(
         await bus.PublishAsync(new ContentReadyToPublishIntegrationEvent(
             Guid.NewGuid(), clock.UtcNow, item.Id, item.CategoryId, TestMode: true,
             rev.Title, rev.ShortX, rev.BodyHtml, rev.InstagramCaption, rev.Tags.ToList(), rev.PrimaryKeyword, mediaUrl,
-            Link: null, ScheduledAt: null, AdGate: false, VideoUrl: LatestVideoUrl(item)), ct);
+            Link: null, ScheduledAt: null, AdGate: false, VideoUrl: LatestVideoUrl(item),
+            StoryImageUrl: LatestStoryUrl(item)), ct);
         return Result.Success();
     }
 
@@ -409,11 +624,106 @@ public sealed class ContentGenerationService(
     /// (Listenin sırasına güvenilmez: EF koleksiyonu DB'den Guid anahtar sırasıyla, yani RASTGELE
     /// yükler — SkiaCard'dan SONRA üretilen AI görseli listede önde kalıp seçilmeyebiliyordu.)</summary>
     private static string? LatestImageUrl(ContentItem item) =>
-        item.Media.Where(m => m.Kind != MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault()?.Url;
+        item.Media.Where(m => m.Kind != MediaKind.Video && m.Kind != MediaKind.Story).OrderBy(m => m.CreatedAt).LastOrDefault()?.Url;
 
     /// <summary>Son VİDEO medya URL'i (Reels/Shorts) — üretim zamanına göre en yenisi.</summary>
     private static string? LatestVideoUrl(ContentItem item) =>
         item.Media.Where(m => m.Kind == MediaKind.Video).OrderBy(m => m.CreatedAt).LastOrDefault()?.Url;
+
+    /// <summary>Son 9:16 HİKAYE görseli URL'i (IG story).</summary>
+    private static string? LatestStoryUrl(ContentItem item) =>
+        item.Media.Where(m => m.Kind == MediaKind.Story).OrderBy(m => m.CreatedAt).LastOrDefault()?.Url;
+
+    private (int W, int H) VideoSize()
+    {
+        var o = mediaOptions.Value;
+        return (o.VideoWidth > 0 ? o.VideoWidth : 1080, o.VideoHeight > 0 ? o.VideoHeight : 1920);
+    }
+
+    /// <summary>Havuz metninden (virgüllü) rastgele bir dosya adı; boşsa null.</summary>
+    private static string? PickPoolFile(string? pool)
+    {
+        var files = (pool ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return files.Length == 0 ? null : files[System.Random.Shared.Next(files.Length)];
+    }
+
+    /// <summary>Havuzdan rastgele şablon; havuz BOŞSA o türün TÜM şablonlarından rastgele (seçim yoksa yine görsel kullanılsın). Hiç şablon yoksa null.</summary>
+    private string? PickTemplateFile(string? pool, string kind)
+    {
+        var files = (pool ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (files.Count == 0) files = cardAssets.List(kind).ToList();
+        return files.Count == 0 ? null : files[System.Random.Shared.Next(files.Count)];
+    }
+
+    /// <summary>İçeriğin dikkat rozetini çözer: elle override ("" = rozet yok) öncelikli; yoksa kategori açıksa riske göre SON DAKİKA.</summary>
+    private static (string? Text, bool Amber) ResolveBadge(ContentItem item, CategoryAutomation? cat)
+    {
+        if (item.BadgeOverride is { } ov)
+            return string.IsNullOrWhiteSpace(ov) ? (null, false)
+                 : (ov.Trim(), ov.Contains("ŞOK", StringComparison.OrdinalIgnoreCase) || ov.Contains("SOK", StringComparison.OrdinalIgnoreCase));
+        var badgeOn = item.BadgeAuto || (cat?.AttentionBadges ?? false);
+        if (badgeOn && item.RiskLevel is RiskLevel.High or RiskLevel.Medium)
+            return ("SON DAKİKA", false);
+        return (null, false);
+    }
+
+    /// <summary>ResolveBadge'in async sarmalayıcısı: içeriğin kategori otomasyonunu çekip rozeti çözer (video için).</summary>
+    private async Task<(string? Text, bool Amber)> ResolveBadgeAsync(ContentItem item, CancellationToken ct)
+    {
+        var cat = item.CategoryId is { } cid ? await categoryAutomation.GetAsync(cid, ct) : null;
+        return ResolveBadge(item, cat);
+    }
+
+    /// <summary>Video zemini için reels şablonu baytları: item'da saklı havuz ?? kategori CANLI; yoksa null (düz zemin).</summary>
+    private async Task<byte[]?> ResolveReelsBgAsync(ContentItem item, CancellationToken ct)
+    {
+        var stored = item.CardReelsPool;
+        var pool = !string.IsNullOrWhiteSpace(stored)
+                 ? stored
+                 : (item.CategoryId is { } cid ? (await categoryAutomation.GetAsync(cid, ct))?.CardReels : null) ?? "";
+        var file = PickTemplateFile(pool, "reels");
+        return file is not null ? cardAssets.Read("reels", file) : null;
+    }
+
+    private async Task<string?> CategoryNameAsync(ContentItem item, CancellationToken ct)
+    {
+        if (item.CategoryId is not { } catId) return null;
+        return (await categoryProvider.GetActiveAsync(ct)).FirstOrDefault(c => c.Id == catId)?.Name;
+    }
+
+    /// <summary>
+    /// Görsel üretir: kategori/kaynak havuzunda şablon varsa ŞABLONA başlık+rozet+kategori bindirir
+    /// (Template / Story), yoksa düz SkiaCard'a düşer. kind: "1x1" | "reels"; asStory=true → hikaye (9:16).
+    /// </summary>
+    private async Task<(string Url, MediaKind Kind)> BuildCardImageAsync(ContentItem item, string title, string kind, bool asStory, int w, int h, CancellationToken ct)
+    {
+        var isReels = string.Equals(kind, "reels", StringComparison.OrdinalIgnoreCase);
+        // Kategori otomasyonu (havuz + rozet). Item'da saklı havuz BOŞSA (eski/manuel içerik) kategorinin GÜNCEL havuzuna düş.
+        var cat = item.CategoryId is { } cid ? await categoryAutomation.GetAsync(cid, ct) : null;
+        var stored = isReels ? item.CardReelsPool : item.Card1x1Pool;
+        var pool = !string.IsNullOrWhiteSpace(stored) ? stored : (isReels ? cat?.CardReels : cat?.Card1x1) ?? "";
+        var file = PickTemplateFile(pool, kind);
+        if (file is not null && cardAssets.Read(kind, file) is { Length: > 0 } bytes)
+        {
+            var (badge, amber) = ResolveBadge(item, cat);
+            var catName = await CategoryNameAsync(item, ct);
+            var png = cardRenderer.RenderOnTemplate(bytes, title, badge, amber, catName, w, h);
+            var url = await mediaStore.SaveAsync(png, "image/png", ct);
+            return (url, asStory ? MediaKind.Story : MediaKind.Template);
+        }
+        var card = cardRenderer.RenderTitleCard(title, System.Random.Shared.Next(0, 24).ToString(), w, h);
+        var url2 = await mediaStore.SaveAsync(card, "image/png", ct);
+        return (url2, asStory ? MediaKind.Story : MediaKind.SkiaCard);
+    }
+
+    /// <summary>İçerik için 9:16 HİKAYE görseli üretir (yoksa) — IG hikayesi 1:1 yerine bunu kullanır.</summary>
+    private async Task EnsureStoryAsync(ContentItem item, string title, CancellationToken ct)
+    {
+        if (item.Media.Any(m => m.Kind == MediaKind.Story)) return;
+        var (vw, vh) = VideoSize();
+        var (url, kind) = await BuildCardImageAsync(item, title, "reels", asStory: true, vw, vh, ct);
+        item.AddMedia(kind, url, vw, vh, titleBurned: true, clock);
+    }
 
     /// <summary>
     /// Reels/Shorts/TikTok için slayt videosu üretir (X metni → 3 sayfa × 7 sn = 21 sn, 1080x1920).
@@ -444,6 +754,11 @@ public sealed class ContentGenerationService(
                     return Result.Failure<string?>(Error.Conflict("AI arka plan görseli üretilemedi (boş yanıt)."));
                 bgImage = img.Bytes;
             }
+            else
+            {
+                // AI istenmediyse: reels şablon havuzundan zemin (item saklı ?? kategori canlı) — yoksa şablonlu koyu zemin.
+                bgImage = await ResolveReelsBgAsync(item, ct);
+            }
 
             // Arka plan müziği (panelden yüklenen mp3 — video.music_url). Yoksa sessiz video.
             byte[]? music = null;
@@ -456,7 +771,8 @@ public sealed class ContentGenerationService(
             if (item.CategoryId is { } catId)
                 category = (await categoryProvider.GetActiveAsync(ct)).FirstOrDefault(c => c.Id == catId)?.Name;
 
-            var bytes = await videoRenderer.RenderSlidesVideoAsync(title, text!, music, style, category, bgImage, ct);
+            var (vbadge, vamber) = await ResolveBadgeAsync(item, ct);
+            var bytes = await videoRenderer.RenderSlidesVideoAsync(title, text!, music, style, category, bgImage, vbadge, vamber, ct);
             var url = await mediaStore.SaveAsync(bytes, "video/mp4", ct);
             var o = mediaOptions.Value;
             item.AddMedia(MediaKind.Video, url, o.VideoWidth > 0 ? o.VideoWidth : 1080,
@@ -467,6 +783,9 @@ public sealed class ContentGenerationService(
                 item.MarkAwaitingManualImage(clock);
             await repository.SaveChangesAsync(ct);
             audit.Log(item.Id, AuditEvent.Generated, ActorType.AdminUser, "admin", "Slayt videosu üretildi");
+            // Planlanmış/yayınlanmış içerikte video sonradan değişirse yayın anlık kopyası (payload) TAZELENSİN —
+            // aksi halde planlanan gönderi ESKİ videoyu paylaşırdı. Görsel akışıyla simetrik (onaylı değilse no-op).
+            await PublishIfApprovedAsync(item, LatestImageUrl(item), ct);
             return Result.Success<string?>(url);
         }
         catch (Exception ex)

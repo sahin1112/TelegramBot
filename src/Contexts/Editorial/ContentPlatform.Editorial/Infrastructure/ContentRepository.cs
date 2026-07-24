@@ -16,7 +16,8 @@ internal sealed class ContentRepository(EditorialDbContext db) : IContentReposit
         await db.ContentItems.AddAsync(item, ct);
 
     public async Task<IReadOnlyList<ContentItem>> GetByStatusAsync(EditorialStatus status, int take, CancellationToken ct) =>
-        await db.ContentItems.Where(x => x.EditorialStatus == status)
+        await db.ContentItems.Include(x => x.Revisions).Include(x => x.Media)
+            .Where(x => x.EditorialStatus == status)
             .OrderBy(x => x.CreatedAt).Take(take).ToListAsync(ct);
 
     public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
@@ -32,6 +33,14 @@ internal sealed class ContentRepository(EditorialDbContext db) : IContentReposit
                          (x.MediaStatus == Domain.MediaStatus.Ready && !x.Revisions.Any(r => r.IsCurrent))))
             .OrderBy(x => x.CreatedAt).Take(take).ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Guid>> GetAutoDraftCandidateIdsAsync(int take, CancellationToken ct) =>
+        await db.ContentItems
+            .Where(x => x.EditorialStatus == Domain.EditorialStatus.Draft &&
+                        ((x.AutoContent && x.ContentGen == Domain.GenStepStatus.None) ||
+                         (x.AutoImage && x.ImageGen == Domain.GenStepStatus.None) ||
+                         (x.AutoVideo && x.VideoGen == Domain.GenStepStatus.None)))
+            .OrderBy(x => x.CreatedAt).Take(take).Select(x => x.Id).ToListAsync(ct);
+
     public async Task<IReadOnlyList<ContentItem>> GetAwaitingManualImageAsync(int take, CancellationToken ct) =>
         await db.ContentItems.Include(x => x.Revisions)
             .Where(x => x.MediaStatus == Domain.MediaStatus.AwaitingManualUpload)
@@ -39,7 +48,7 @@ internal sealed class ContentRepository(EditorialDbContext db) : IContentReposit
 
     public async Task<(IReadOnlyList<ContentItem> Items, int Total)> GetPagedAsync(Domain.EditorialStatus? status, string? search, Guid? categoryId, bool uncategorized, int page, int size, bool ascending, CancellationToken ct)
     {
-        var q = db.ContentItems.Include(x => x.Revisions).AsQueryable();
+        var q = db.ContentItems.Include(x => x.Revisions).Include(x => x.Media).AsQueryable();
         if (status is { } s) q = q.Where(x => x.EditorialStatus == s);
         // Kategori izolasyonu: panelde her kategori yalnız kendi içeriklerini görür.
         if (categoryId is { } cid) q = q.Where(x => x.CategoryId == cid);

@@ -58,7 +58,9 @@ public sealed class DiscoveryService(
 
                     await bus.PublishAsync(new ContentDiscoveredIntegrationEvent(
                         Guid.NewGuid(), clock.UtcNow, source.CategoryId, source.Type.ToString(),
-                        item.Url, hash, item.Title, item.Summary, raw, fp), ct);
+                        item.Url, hash, item.Title, item.Summary, raw, fp,
+                        source.AutoContent, source.AutoImage, source.AutoVideo,
+                        source.Card1x1, source.CardReels), ct);
 
                     await dedup.MarkSeenAsync(hash, source.Id, ct);
                     discovered++;

@@ -75,6 +75,36 @@ public sealed class ContentItem : Entity
     public DateTimeOffset? PublishedAt { get; private set; }
     public string? Error { get; private set; }
 
+    // ---- Otomatik üretim niyeti (RSS keşfinde kategori/kaynak ayarından çözülür) ----
+    /// <summary>Kaç başarısız deneme sonrası bir adım "üretilemedi" (Failed) sayılır.</summary>
+    public const int MaxAutoAttempts = 3;
+
+    /// <summary>Otomatik metin (AI içerik) üretilsin mi?</summary>
+    public bool AutoContent { get; private set; }
+    /// <summary>Otomatik (rastgele SkiaCard) görsel üretilsin mi?</summary>
+    public bool AutoImage { get; private set; }
+    /// <summary>Otomatik SkiaCard slayt videosu üretilsin mi?</summary>
+    public bool AutoVideo { get; private set; }
+    /// <summary>Üretim bitince otomatik onaylanıp yayına gönderilsin mi? (kapalı = taslakta bekler)</summary>
+    public bool AutoPublish { get; private set; }
+
+    public GenStepStatus ContentGen { get; private set; }
+    public GenStepStatus ImageGen { get; private set; }
+    public GenStepStatus VideoGen { get; private set; }
+    public int ContentAttempts { get; private set; }
+    public int ImageAttempts { get; private set; }
+    public int VideoAttempts { get; private set; }
+
+    // ---- Görsel şablon havuzu (item oluşturulurken kaynak/kategoriden çözülür; boş = varsayılan SkiaCard) ----
+    /// <summary>1:1 şablon dosya adları (virgüllü). Boşsa üretimde düz SkiaCard kullanılır.</summary>
+    public string Card1x1Pool { get; private set; } = "";
+    /// <summary>9:16 (reels/hikaye) şablon dosya adları (virgüllü).</summary>
+    public string CardReelsPool { get; private set; } = "";
+    /// <summary>Risk seviyesine göre otomatik SON DAKİKA rozeti bu içerik için açık mı? (kategori ayarı)</summary>
+    public bool BadgeAuto { get; private set; }
+    /// <summary>Elle seçilen rozet: null = otomatik (riske göre), "" = rozet YOK (zorla), aksi = zorla o metin ("SON DAKİKA"/"ŞOK").</summary>
+    public string? BadgeOverride { get; private set; }
+
     public IReadOnlyList<ContentRevision> Revisions => _revisions;
     public IReadOnlyList<MediaAsset> Media => _media;
 
@@ -189,6 +219,43 @@ public sealed class ContentItem : Entity
         PublishedAt = clock.UtcNow;
         Touch(clock);
     }
+
+    // ---- Otomatik üretim niyeti + adım sonuçları ----
+
+    /// <summary>RSS keşfinde otomatik üretim niyetini belirler (kaynak ?? kategori ayarından çözülmüş).</summary>
+    public void ConfigureAutomation(bool content, bool image, bool video, bool publish, IClock clock)
+    {
+        AutoContent = content;
+        AutoImage = image;
+        AutoVideo = video;
+        AutoPublish = publish;
+        Touch(clock);
+    }
+
+    /// <summary>Görsel şablon havuzunu ve rozet ayarını uygular (kaynak/kategoriden çözülmüş).</summary>
+    public void ConfigureCards(string card1x1Pool, string cardReelsPool, bool badgeAuto, IClock clock)
+    {
+        Card1x1Pool = card1x1Pool ?? "";
+        CardReelsPool = cardReelsPool ?? "";
+        BadgeAuto = badgeAuto;
+        Touch(clock);
+    }
+
+    /// <summary>Panelden elle rozet seçimi (null=otomatik, ""=yok, "SON DAKİKA"/"ŞOK"=zorla).</summary>
+    public void SetBadgeOverride(string? badge, IClock clock)
+    {
+        BadgeOverride = badge;
+        Touch(clock);
+    }
+
+    public void MarkContentGenerated(IClock clock) { ContentGen = GenStepStatus.Done; Touch(clock); }
+    public void MarkImageGenerated(IClock clock) { ImageGen = GenStepStatus.Done; Touch(clock); }
+    public void MarkVideoGenerated(IClock clock) { VideoGen = GenStepStatus.Done; Touch(clock); }
+
+    /// <summary>Başarısız denemeyi kaydeder; MaxAutoAttempts'e ulaşınca adımı kalıcı olarak Failed'a çeker.</summary>
+    public void RegisterContentFailure(IClock clock) { ContentAttempts++; if (ContentAttempts >= MaxAutoAttempts) ContentGen = GenStepStatus.Failed; Touch(clock); }
+    public void RegisterImageFailure(IClock clock) { ImageAttempts++; if (ImageAttempts >= MaxAutoAttempts) ImageGen = GenStepStatus.Failed; Touch(clock); }
+    public void RegisterVideoFailure(IClock clock) { VideoAttempts++; if (VideoAttempts >= MaxAutoAttempts) VideoGen = GenStepStatus.Failed; Touch(clock); }
 
     public ContentRevision AddRevision(ContentRevision revision)
     {

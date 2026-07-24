@@ -19,4 +19,5 @@ public sealed record ContentReadyToPublishIntegrationEvent(
     string? Link,
     DateTimeOffset? ScheduledAt,
     bool AdGate = false,
-    string? VideoUrl = null) : IIntegrationEvent;
+    string? VideoUrl = null,
+    string? StoryImageUrl = null) : IIntegrationEvent;

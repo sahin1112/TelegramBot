@@ -16,3 +16,6 @@ appsettings.*.local.json
 
 ## Yayın (publish) çıktısı — derleme artefaktı, gite girmez
 publish/
+
+# Kategori görsel şablonları (büyük; deploy ile ayrı taşınır)
+src/Host/ContentPlatform.Api/wwwroot/assets/cards/

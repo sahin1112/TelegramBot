@@ -74,8 +74,45 @@ namespace ContentPlatform.Editorial.Infrastructure.Migrations
                     b.Property<string>("ApprovedByRef")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<bool>("AutoContent")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoImage")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoPublish")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoVideo")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("BadgeAuto")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("BadgeOverride")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Card1x1Pool")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("CardReelsPool")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ContentAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentGen")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -95,6 +132,14 @@ namespace ContentPlatform.Editorial.Infrastructure.Migrations
 
                     b.Property<string>("Error")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ImageAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ImageGen")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<string>("ImageSource")
                         .IsRequired()
@@ -145,6 +190,14 @@ namespace ContentPlatform.Editorial.Infrastructure.Migrations
 
                     b.Property<bool>("UseAi")
                         .HasColumnType("bit");
+
+                    b.Property<int>("VideoAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VideoGen")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.HasKey("Id");
 

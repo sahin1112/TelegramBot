@@ -21,4 +21,9 @@
     </PackageReference>
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets/Fonts/Montserrat-ExtraBold.ttf" />
+    <EmbeddedResource Include="Assets/Fonts/Montserrat-SemiBold.ttf" />
+    <EmbeddedResource Include="Assets/Fonts/Montserrat-Medium.ttf" />
+  </ItemGroup>
 </Project>

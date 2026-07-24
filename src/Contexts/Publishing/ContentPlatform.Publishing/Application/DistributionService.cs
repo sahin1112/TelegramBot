@@ -110,7 +110,8 @@ public sealed class DistributionService(
 
         var request = new PublishRequest(
             pub.Channel, payload.Title, text, payload.Hashtags,
-            mediaUrl, payload.Link, pub.TargetRef, media, payload.ButtonUrl, payload.ButtonText, videoUrl, videoMedia);
+            mediaUrl, payload.Link, pub.TargetRef, media, payload.ButtonUrl, payload.ButtonText, videoUrl, videoMedia,
+            payload.StoryImageUrl);
 
         PublishResult result;
         try

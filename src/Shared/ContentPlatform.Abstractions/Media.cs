@@ -5,6 +5,14 @@ public interface ICardRenderer
 {
     /// <summary>Başlık kartını PNG bayt olarak üretir.</summary>
     byte[] RenderTitleCard(string title, string? theme, int width, int height);
+
+    /// <summary>
+    /// Bir ŞABLON görselin üzerine başlığı bindirir: en geniş boş alanı otomatik bulur, o bölgenin
+    /// koyu/açıklığına göre satır satır beyaz/siyah metin seçer; kategori etiketini (sol üst) ve
+    /// istenirse premium dikkat rozetini (başlığın altında ortada; kırmızı SON DAKİKA / amber ŞOK) basar.
+    /// badgeText null/boş → rozet yok. PNG bayt döner. 1:1 ve 9:16 (reels/hikaye) için kullanılır.
+    /// </summary>
+    byte[] RenderOnTemplate(byte[] templateBytes, string title, string? badgeText, bool badgeAmber, string? category, int width, int height);
 }
 
 /// <summary>Üretilen/yüklenen görseli saklar ve erişilebilir bir URL döner (yerel/S3/CDN).</summary>

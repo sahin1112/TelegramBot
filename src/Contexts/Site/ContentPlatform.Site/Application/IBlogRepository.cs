@@ -7,5 +7,6 @@ public interface IBlogRepository
 {
     Task<BlogPost?> GetByContentItemAsync(Guid contentItemId, CancellationToken ct);
     Task AddAsync(BlogPost post, CancellationToken ct);
+    void Remove(BlogPost post);
     Task SaveChangesAsync(CancellationToken ct);
 }

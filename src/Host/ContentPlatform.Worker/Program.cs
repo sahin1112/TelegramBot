@@ -64,6 +64,12 @@ builder.Services.AddQuartz(q =>
     q.AddTrigger(t => t.ForJob(drainKey).WithIdentity($"{nameof(PipelineDrainJob)}-trigger")
         .WithSimpleSchedule(s => s.WithIntervalInMinutes(1).RepeatForever()));
 
+    // Otomatik taslak hazırlama (RSS otomasyonu: metin+görsel+video): her dakika
+    var autoKey = new JobKey(nameof(AutoDraftJob));
+    q.AddJob<AutoDraftJob>(o => o.WithIdentity(autoKey));
+    q.AddTrigger(t => t.ForJob(autoKey).WithIdentity($"{nameof(AutoDraftJob)}-trigger")
+        .WithSimpleSchedule(s => s.WithIntervalInMinutes(1).RepeatForever()));
+
     // Takılı (Pending) yayın kurtarma taraması: 30 sn'de bir (başarısızlar artık kendi gecikmeli planıyla döner)
     var outboxKey = new JobKey(nameof(OutboxDispatchJob));
     q.AddJob<OutboxDispatchJob>(o => o.WithIdentity(outboxKey));

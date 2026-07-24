@@ -11,7 +11,18 @@ public sealed record ContentSummaryDto(
     string? Title,
     Guid? CategoryId,
     bool TestMode,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    // Satırda içine girmeden gösterilen üretim durumları (rozetler)
+    bool HasContent,
+    bool HasImage,
+    bool HasVideo,
+    string ContentGen,   // None | Done | Failed (otomatik üretim adımı)
+    string ImageGen,
+    string VideoGen,
+    bool AutoContent,
+    bool AutoImage,
+    bool AutoVideo,
+    bool AutoPublish);
 
 public sealed record ApproveRequest(ImageSource? ImageSource, bool? TestMode, DateTimeOffset? ScheduledAt);
 public sealed record BulkApproveRequest(IReadOnlyList<Guid> Ids);
@@ -29,7 +40,13 @@ public sealed record ContentDetailDto(
     RiskLevel RiskLevel, ImageSource ImageSource, bool TestMode, Guid? CategoryId,
     string? Title, string? ShortX, string? BodyHtml, string? InstagramCaption,
     IReadOnlyList<string> Tags, string? MediaUrl, string? VideoUrl, DateTimeOffset CreatedAt, DateTimeOffset? ScheduledAt, DateTimeOffset? PublishedAt,
-    string? HoldReason, string? RawInput);
+    string? HoldReason, string? RawInput, string? StoryUrl, string? BadgeOverride);
+
+/// <summary>Panelden elle rozet: null=otomatik (riske göre), ""=rozet yok, "SON DAKİKA"/"ŞOK"=zorla.</summary>
+public sealed record BadgeRequest(string? Badge);
+
+/// <summary>Toplu silme (arşivle + siteden/yayından kaldır).</summary>
+public sealed record BulkDeleteRequest(IReadOnlyList<Guid> Ids);
 
 public sealed record PagedContentDto(IReadOnlyList<ContentSummaryDto> Items, int Page, int Size, int Total);
 

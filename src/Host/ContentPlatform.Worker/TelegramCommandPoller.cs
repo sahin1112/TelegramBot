@@ -55,6 +55,10 @@ public sealed class TelegramCommandPoller(
                 // Yeni kategori panelden eklenince (≤5 dk içinde) menüde kendiliğinden belirir.
                 await SyncBotCommandsAsync(tokens, stoppingToken);
 
+                if (firstPass)
+                    foreach (var token in tokens)
+                        await DeleteWebhookAsync(token, stoppingToken); // webhook takılıysa getUpdates 409 verir → sil
+
                 foreach (var token in tokens)
                     await PollOnceAsync(token, drainOnly: firstPass, stoppingToken);
 
@@ -67,6 +71,21 @@ public sealed class TelegramCommandPoller(
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
         }
+    }
+
+    /// <summary>Long-polling'in çalışması için webhook'u kaldırır. Webhook takılıysa getUpdates 409 döndürür
+    /// ve bot komutlara SESSİZCE cevap vermez; bu çağrı o durumu kesin çözer. Bekleyen güncellemeleri DÜŞÜRMEZ.</summary>
+    private async Task DeleteWebhookAsync(string token, CancellationToken ct)
+    {
+        try
+        {
+            var client = httpClientFactory.CreateClient();
+            using var r = await client.PostAsJsonAsync(
+                $"https://api.telegram.org/bot{token}/deleteWebhook", new { drop_pending_updates = false }, ct);
+            logger.LogInformation("Telegram deleteWebhook (long-polling garantisi): HTTP {Code}", (int)r.StatusCode);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { logger.LogWarning(ex, "deleteWebhook basarisiz"); }
     }
 
     private async Task<IReadOnlyList<string>> GetBotTokensAsync(CancellationToken ct)
@@ -109,7 +128,8 @@ public sealed class TelegramCommandPoller(
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "getUpdates hatasi (webhook acik olabilir ya da ag sorunu)");
+            logger.LogWarning(ex, "getUpdates hatasi (webhook acik olabilir ya da ag sorunu) — webhook silinip yeniden denenecek");
+            await DeleteWebhookAsync(token, ct); // olası webhook çakışmasını (409) onar
             return;
         }
 

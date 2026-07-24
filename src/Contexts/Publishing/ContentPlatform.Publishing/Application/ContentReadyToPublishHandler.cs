@@ -40,7 +40,7 @@ public sealed class ContentReadyToPublishHandler(
 
         var (buttonUrl, buttonText) = await BuildDetailButtonAsync(e, ct);
         // Etiketler ham metin degil HASHTAG olarak gider: "kripto, bitcoin" -> #Kripto #Bitcoin
-        var payloadJson = JsonSerializer.Serialize(new PublicationPayload(e.Title, e.ShortX, ToHashtags(e.Tags), e.MediaUrl, e.Link, buttonUrl, buttonText, e.VideoUrl, e.InstagramCaption));
+        var payloadJson = JsonSerializer.Serialize(new PublicationPayload(e.Title, e.ShortX, ToHashtags(e.Tags), e.MediaUrl, e.Link, buttonUrl, buttonText, e.VideoUrl, e.InstagramCaption, e.StoryImageUrl));
 
         var totalTargets = 0;
         foreach (var channel in SocialChannels)

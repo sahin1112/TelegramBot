@@ -8,5 +8,5 @@ public interface ISlideVideoRenderer
     /// category: içerik kategorisi adı — slaytlara rozet olarak basılır (ne haberi olduğu anlaşılsın).
     /// backgroundImage: opsiyonel AI arka plan görseli (dikey) — verilirse şablon zemini yerine
     /// cover-crop edilip üstüne koyu katman (scrim) basılır; yazılar onun üzerine çizilir.</summary>
-    Task<byte[]> RenderSlidesVideoAsync(string title, string text, byte[]? musicBytes, int? style, string? category, byte[]? backgroundImage, CancellationToken ct);
+    Task<byte[]> RenderSlidesVideoAsync(string title, string text, byte[]? musicBytes, int? style, string? category, byte[]? backgroundImage, string? badgeText, bool badgeAmber, CancellationToken ct);
 }

@@ -51,7 +51,7 @@ internal sealed class SlideVideoRenderer(
         new("Petrol",   new(0x06,0x0E,0x0E), new(0x0B,0x17,0x17), new(0x2E,0x9E,0x9E), new(0x5C,0xD0,0xC4), new(0xC2,0xDA,0xDA), 0),
     };
 
-    public async Task<byte[]> RenderSlidesVideoAsync(string title, string text, byte[]? musicBytes, int? style, string? category, byte[]? backgroundImage, CancellationToken ct)
+    public async Task<byte[]> RenderSlidesVideoAsync(string title, string text, byte[]? musicBytes, int? style, string? category, byte[]? backgroundImage, string? badgeText, bool badgeAmber, CancellationToken ct)
     {
         var o = mediaOptions.Value;
         int w = o.VideoWidth > 0 ? o.VideoWidth : 1080;
@@ -66,6 +66,9 @@ internal sealed class SlideVideoRenderer(
         using var bgImage = backgroundImage is { Length: > 0 } ? SKImage.FromEncodedData(backgroundImage) : null;
         if (backgroundImage is { Length: > 0 } && bgImage is null)
             logger.LogWarning("Video arka plan görseli çözülemedi — şablon zeminiyle devam ediliyor.");
+        // Adaptif metin rengi için zemin görselinin küçük luminance ızgarası (karartma yerine).
+        float[]? bgLum = null; int glw = 0, glh = 0;
+        if (bgImage is not null) { var g = SampleGrid(bgImage); bgLum = g.Lum; glw = g.W; glh = g.H; }
 
         var parts = SplitSlides(text);
         var dir = Path.Combine(Path.GetTempPath(), "cp-video-" + Guid.NewGuid().ToString("N"));
@@ -83,7 +86,7 @@ internal sealed class SlideVideoRenderer(
                 for (var k = 0; k < steps; k++)
                 {
                     var remaining = parts.Count > 1 ? 1f - (k + 0.5f) / steps : -1f;
-                    var png = DrawSlide(title, parts[i], i, parts.Count, w, h, s, category, bgImage, remaining);
+                    var png = DrawSlide(title, parts[i], i, parts.Count, w, h, s, category, bgImage, bgLum, glw, glh, badgeText, badgeAmber, remaining);
                     var file = Path.Combine(dir, $"f{fi++}.png");
                     await File.WriteAllBytesAsync(file, png, ct);
                     frames.Add((file, (double)secs / steps));
@@ -180,7 +183,7 @@ internal sealed class SlideVideoRenderer(
     }
 
     // ---------- tek slayt (1080x1920) ----------
-    private byte[] DrawSlide(string title, string part, int index, int total, int w, int h, VideoStyle st, string? category, SKImage? bgImage, float remaining)
+    private byte[] DrawSlide(string title, string part, int index, int total, int w, int h, VideoStyle st, string? category, SKImage? bgImage, float[]? bgLum, int gw, int gh, string? badgeText, bool badgeAmber, float remaining)
     {
         var s = w / 1080f;
         var (Accent, Accent2, TitleC) = (st.Accent, st.Accent2, st.TitleC);
@@ -196,12 +199,7 @@ internal sealed class SlideVideoRenderer(
             var dst = new SKRect((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f);
             using (var bp = new SKPaint { IsAntialias = true })
                 canvas.DrawImage(bgImage, dst, new SKSamplingOptions(SKCubicResampler.Mitchell), bp);
-            // SCRIM: yazı okunabilirliği için koyu katman — üst (rozetler) ve alt (metin/altbilgi) daha koyu.
-            using var scrim = new SKPaint { IsAntialias = true };
-            scrim.Shader = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(0, h),
-                new[] { new SKColor(0, 0, 0, 0xB4), new SKColor(0, 0, 0, 0x82), new SKColor(0, 0, 0, 0xC6) },
-                new[] { 0f, 0.42f, 1f }, SKShaderTileMode.Clamp);
-            canvas.DrawRect(SKRect.Create(0, 0, w, h), scrim);
+            // KARARTMA YOK — metin, altındaki bölgenin koyu/açıklığına göre beyaz/siyah + zıt kontur ile okunur.
         }
         else
         {
@@ -267,6 +265,26 @@ internal sealed class SlideVideoRenderer(
 
         var margin = 84f * s;
 
+        // Şablon zemininde: bir yatay bandın koyu/açıklığına göre metin rengi + zıt renkli kontur.
+        (SKColor Fill, SKColor Outline) PickColors(float ny0, float ny1)
+        {
+            if (bgLum is null) return (TextC, new SKColor(0, 0, 0, 0));
+            var lum = BandLum(bgLum, gw, gh, ny0, ny1);
+            return lum < 140f
+                ? (new SKColor(0xFF, 0xFF, 0xFF), SKColors.Black.WithAlpha(0xB4))
+                : (new SKColor(0x12, 0x16, 0x1C), SKColors.White.WithAlpha(0xCC));
+        }
+        void DrawLine(string text, float x, float y, SKFont font, SKColor fill, SKColor outline)
+        {
+            if (outline.Alpha > 0)
+            {
+                using var op = new SKPaint { IsAntialias = true, Color = outline, Style = SKPaintStyle.Stroke, StrokeWidth = MathF.Max(2f, font.Size * 0.06f), StrokeJoin = SKStrokeJoin.Round };
+                canvas.DrawText(text, x, y, font, op);
+            }
+            using var tp = new SKPaint { IsAntialias = true, Color = fill };
+            canvas.DrawText(text, x, y, font, tp);
+        }
+
         // Marka rozeti + KATEGORİ rozeti (yan yana; kategori dolu zeminli — ne haberi olduğu ilk bakışta anlaşılır)
         var pillX = margin;
         var brand = BrandText();
@@ -324,19 +342,30 @@ internal sealed class SlideVideoRenderer(
             }
         }
 
-        // Başlık (bağlam — her sayfada, küçük)
+        // SON DAKİKA / ŞOK rozeti — pillerin altında ORTADA (görsel örnekleriyle uyumlu; karartma yok)
+        if (!string.IsNullOrWhiteSpace(badgeText))
+        {
+            var bt = badgeText!.Trim().ToUpper(System.Globalization.CultureInfo.GetCultureInfo("tr-TR"));
+            using var bf = MakeFont(46f * s, SKFontStyleWeight.ExtraBold);
+            var (bg1, bg2, bglow) = badgeAmber
+                ? (new SKColor(0xE0, 0x8A, 0x12), new SKColor(0xF5, 0xA5, 0x24), new SKColor(0xF5, 0xA5, 0x24))
+                : (new SKColor(0xC6, 0x18, 0x24), new SKColor(0xF0, 0x3A, 0x32), new SKColor(0xE4, 0x1E, 0x2C));
+            DrawCenterPill(canvas, w / 2f, 214f * s, bt, bf, bg1, bg2, bglow.WithAlpha(0xAA), 40f * s, 18f * s, 16f * s);
+        }
+
+        // Başlık (bağlam — her sayfada, küçük). Şablonda adaptif renk + kontur.
         var maxWidth = w - margin * 2;
         using (var tf = MakeFont(44f * s, SKFontStyleWeight.Bold))
         {
             var tLines = WrapText(title, tf, maxWidth);
             if (tLines.Count > 3) { tLines = tLines.Take(3).ToList(); tLines[^1] = Ellipsize(tLines[^1], tf, maxWidth); }
-            using var tp = new SKPaint { IsAntialias = true, Color = TitleC };
-            var ty = 300f * s;
-            foreach (var line in tLines) { canvas.DrawText(line, margin, ty, tf, tp); ty += tf.Size * 1.25f; }
+            var (tfill, tout) = bgLum is not null ? PickColors(0.30f, 0.42f) : (TitleC, new SKColor(0, 0, 0, 0));
+            var ty = 340f * s;
+            foreach (var line in tLines) { DrawLine(line, margin, ty, tf, tfill, tout); ty += tf.Size * 1.25f; }
         }
 
         // Ana metin parçası (büyük, dikeyde ortalı)
-        var areaTop = 520f * s; var areaBottom = h - 420f * s;
+        var areaTop = 560f * s; var areaBottom = h - 420f * s;
         List<string> lines = new(); SKFont? font = null; float lineH = 0;
         foreach (var size in new[] { 64f, 58f, 52f, 47f, 42f, 38f })
         {
@@ -357,10 +386,10 @@ internal sealed class SlideVideoRenderer(
                 new[] { Accent, Accent2 }, null, SKShaderTileMode.Clamp);
             canvas.DrawRoundRect(new SKRect(margin - 34f * s, top + 8f * s, margin - 24f * s, top + blockH - 4f * s), 5f * s, 5f * s, vb);
         }
-        using (var mp = new SKPaint { IsAntialias = true, Color = TextC })
         {
             var y = top + font!.Size;
-            foreach (var line in lines) { canvas.DrawText(line, margin, y, font, mp); y += lineH; }
+            var (bfill, bout) = bgLum is not null ? PickColors(top / h, (top + blockH) / h) : (TextC, new SKColor(0, 0, 0, 0));
+            foreach (var line in lines) { DrawLine(line, margin, y, font, bfill, bout); y += lineH; }
         }
         font!.Dispose();
 
@@ -373,10 +402,10 @@ internal sealed class SlideVideoRenderer(
             canvas.DrawCircle(startX + i * gap, dotY, i == index ? dotR * 1.25f : dotR, dp);
         }
         using (var pf = MakeFont(30f * s, SKFontStyleWeight.Medium))
-        using (var pp = new SKPaint { IsAntialias = true, Color = MutedC })
         {
             var pTxt = $"{index + 1}/{total}";
-            canvas.DrawText(pTxt, w / 2f - pf.MeasureText(pTxt) / 2f, dotY + 64f * s, pf, pp);
+            var (pfill, pout) = bgLum is not null ? PickColors((dotY + 40f * s) / h, (dotY + 74f * s) / h) : (MutedC, new SKColor(0, 0, 0, 0));
+            DrawLine(pTxt, w / 2f - pf.MeasureText(pTxt) / 2f, dotY + 64f * s, pf, pfill, pout);
         }
 
         // Alt bilgi (alan adı)
@@ -384,15 +413,69 @@ internal sealed class SlideVideoRenderer(
         if (domain.Length > 0)
         {
             using var ff = MakeFont(36f * s, SKFontStyleWeight.Bold);
-            using var fp = new SKPaint { IsAntialias = true, Color = TextC.WithAlpha(0xD9) };
+            var (ffill, fout) = bgLum is not null ? PickColors((h - 175f * s) / h, (h - 120f * s) / h) : (TextC.WithAlpha(0xD9), new SKColor(0, 0, 0, 0));
             using (var dp2 = new SKPaint { IsAntialias = true, Color = Accent })
                 canvas.DrawCircle(margin + 8f * s, h - 140f * s - 12f * s, 9f * s, dp2);
-            canvas.DrawText(domain, margin + 34f * s, h - 140f * s, ff, fp);
+            DrawLine(domain, margin + 34f * s, h - 140f * s, ff, ffill, fout);
         }
 
         using var image = surface.Snapshot();
         using var data = image.Encode(SKEncodedImageFormat.Png, 92);
         return data.ToArray();
+    }
+
+    // ---------- adaptif renk yardımcıları (şablon zemini) ----------
+    /// <summary>Zemin görselini küçük bir luminance ızgarasına indirger (metin rengini bölgeye göre seçmek için).</summary>
+    private static (float[] Lum, int W, int H) SampleGrid(SKImage img)
+    {
+        var gw = 48;
+        var gh = Math.Max(1, (int)Math.Round((double)img.Height / img.Width * gw));
+        using var bmp = new SKBitmap(new SKImageInfo(gw, gh, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var c = new SKCanvas(bmp))
+        {
+            c.Clear(SKColors.Black);
+            c.DrawImage(img, new SKRect(0, 0, gw, gh), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+        }
+        var lum = new float[gw * gh];
+        for (var y = 0; y < gh; y++)
+            for (var x = 0; x < gw; x++)
+            {
+                var pix = bmp.GetPixel(x, y);
+                lum[y * gw + x] = 0.299f * pix.Red + 0.587f * pix.Green + 0.114f * pix.Blue;
+            }
+        return (lum, gw, gh);
+    }
+
+    /// <summary>Dikey [ny0..ny1] bandının (tam genişlik) ortalama parlaklığı.</summary>
+    private static float BandLum(float[] lum, int gw, int gh, float ny0, float ny1)
+    {
+        var y0 = Math.Clamp((int)(ny0 * gh), 0, gh - 1);
+        var y1 = Math.Clamp((int)(ny1 * gh), y0 + 1, gh);
+        double sum = 0; var n = 0;
+        for (var y = y0; y < y1; y++)
+            for (var x = 0; x < gw; x++) { sum += lum[y * gw + x]; n++; }
+        return n > 0 ? (float)(sum / n) : 160f;
+    }
+
+    private static void DrawCenterPill(SKCanvas canvas, float cx, float y, string text, SKFont font, SKColor g1, SKColor g2, SKColor glow, float padX, float padY, float radius)
+    {
+        var tw = font.MeasureText(text);
+        var wd = tw + padX * 2f; var hgt = font.Size + padY * 2f;
+        var left = cx - wd / 2f;
+        var rect = new SKRect(left, y, left + wd, y + hgt);
+        using (var gp = new SKPaint { IsAntialias = true, Color = glow })
+        {
+            gp.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 16f);
+            canvas.DrawRoundRect(rect, radius, radius, gp);
+        }
+        using (var fill = new SKPaint { IsAntialias = true })
+        {
+            fill.Shader = SKShader.CreateLinearGradient(new SKPoint(rect.Left, rect.Top), new SKPoint(rect.Right, rect.Bottom),
+                new[] { g1, g2 }, null, SKShaderTileMode.Clamp);
+            canvas.DrawRoundRect(rect, radius, radius, fill);
+        }
+        using var tp = new SKPaint { IsAntialias = true, Color = new SKColor(0xFF, 0xFF, 0xFF) };
+        canvas.DrawText(text, rect.Left + padX, rect.MidY + font.Size * 0.36f, font, tp);
     }
 
     // ---------- ffmpeg (test edilmiş komut) ----------
@@ -450,13 +533,7 @@ internal sealed class SlideVideoRenderer(
     }
 
     private static SKFont MakeFont(float size, SKFontStyleWeight weight)
-    {
-        var typeface =
-            SKTypeface.FromFamilyName("Segoe UI", weight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
-            ?? SKTypeface.FromFamilyName("Arial", weight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
-            ?? SKTypeface.Default;
-        return new SKFont(typeface, size) { Subpixel = true };
-    }
+        => new(Fonts.Get(weight), size) { Subpixel = true }; // gömülü Montserrat (bkz. Fonts.cs)
 
     private static string Ellipsize(string line, SKFont font, float maxWidth)
     {

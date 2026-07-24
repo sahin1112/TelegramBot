@@ -19,3 +19,9 @@ public enum ActorType { AdminUser, TelegramMember, System }
 
 /// <summary>İçerik yaşam döngüsü olayları (izlenebilirlik / ContentAudit, 00 §19).</summary>
 public enum AuditEvent { Created, Approved, Rejected, Edited, Generated, HeldForReview, Retracted, Published }
+
+/// <summary>
+/// Otomatik üretim adımının durumu (metin/görsel/video).
+/// None = henüz üretilmedi / tekrar denenebilir, Done = üretildi, Failed = 3 deneme sonrası üretilemedi.
+/// </summary>
+public enum GenStepStatus { None, Done, Failed }

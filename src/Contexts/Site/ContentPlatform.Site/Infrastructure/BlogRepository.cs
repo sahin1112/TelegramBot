@@ -12,5 +12,7 @@ internal sealed class BlogRepository(SiteDbContext db) : IBlogRepository
     public async Task AddAsync(BlogPost post, CancellationToken ct) =>
         await db.BlogPosts.AddAsync(post, ct);
 
+    public void Remove(BlogPost post) => db.BlogPosts.Remove(post);
+
     public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
 }

@@ -33,7 +33,8 @@ public sealed record PublishRequest(
     string? ButtonUrl = null,
     string? ButtonText = null,
     string? VideoUrl = null,
-    MediaContent? VideoMedia = null);
+    MediaContent? VideoMedia = null,
+    string? StoryImageUrl = null); // IG hikaye için 9:16 durağan görsel (1:1 yerine)
 
 public sealed record PublishResult(bool Published, string? ExternalId, Error? Error);
 

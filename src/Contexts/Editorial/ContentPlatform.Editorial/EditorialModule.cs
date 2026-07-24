@@ -20,7 +20,7 @@ public sealed class EditorialModule : IModule
     public void Register(IServiceCollection services, IConfiguration configuration)
     {
         var cs = configuration.GetConnectionString("Default")
-                 ?? "Server=localhost,1433;Database=ContentPlatform;User Id=sa;Password=Sql159753!;TrustServerCertificate=True;";
+                 ?? "Server=localhost;Database=ContentPlatform;User Id=sa;Password=159753;TrustServerCertificate=True;";
 
         services.AddDbContext<EditorialDbContext>(o => o.UseSqlServer(cs, sql =>
             sql.MigrationsHistoryTable("__ef_migrations", EditorialDbContext.Schema)));
@@ -29,6 +29,7 @@ public sealed class EditorialModule : IModule
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
         services.Configure<ContentPlatform.Abstractions.SiteOptions>(configuration.GetSection("Site"));
         services.AddSingleton<ICardRenderer, SkiaCardRenderer>();
+        services.AddSingleton<ICardAssetLibrary, CardAssetLibrary>(); // kategori görsel şablon kütüphanesi
         services.AddSingleton<ISlideVideoRenderer, SlideVideoRenderer>(); // Reels/Shorts slayt videosu
         services.AddScoped<LocalMediaStore>();
         services.AddScoped<IMediaStore>(sp => sp.GetRequiredService<LocalMediaStore>());

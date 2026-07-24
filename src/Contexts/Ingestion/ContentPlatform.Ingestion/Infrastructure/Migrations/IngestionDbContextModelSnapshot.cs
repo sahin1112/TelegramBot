@@ -26,7 +26,6 @@ namespace ContentPlatform.Ingestion.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Ingestion.Domain.SeenItem", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -54,8 +53,22 @@ namespace ContentPlatform.Ingestion.Infrastructure.Migrations
             modelBuilder.Entity("ContentPlatform.Ingestion.Domain.Source", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("AutoContent")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("AutoImage")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("AutoVideo")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Card1x1")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CardReels")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uniqueidentifier");

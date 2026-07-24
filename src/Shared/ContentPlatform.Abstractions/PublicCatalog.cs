@@ -13,6 +13,20 @@ public interface IPublicCategoryProvider
     Task<IReadOnlyList<PublicCategory>> GetActiveAsync(CancellationToken ct);
 }
 
+/// <summary>Bir kategorinin otomatik üretim ayarları (RSS içeriği için).</summary>
+public sealed record CategoryAutomation(bool AutoContent, bool AutoImage, bool AutoVideo, bool AutoPublish,
+    string Card1x1, string CardReels, bool AttentionBadges);
+
+/// <summary>
+/// Kategori otomasyon ayarlarını bağlamlar arasına açar. Platform SAĞLAR, Editorial TÜKETİR
+/// (RSS keşfinde yeni içeriğe otomatik üret/yayınla niyeti uygulanır).
+/// </summary>
+public interface ICategoryAutomationProvider
+{
+    /// <summary>Kategori otomasyon ayarları; kategori yoksa null.</summary>
+    Task<CategoryAutomation?> GetAsync(Guid categoryId, CancellationToken ct);
+}
+
 /// <summary>Üst menü / gezinme öğesi (etiket veya kategori sayfasına link).</summary>
 public sealed record SiteNavItem(string Label, string Href);
 

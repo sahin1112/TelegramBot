@@ -22,4 +22,9 @@ public sealed class MediaOptions
     /// <summary>ffmpeg yolu — boş/varsayılan "ffmpeg" (PATH'te aranır). Windows'ta tam yol verilebilir
     /// (ör. C:\\ffmpeg\\bin\\ffmpeg.exe). Video üretimi için sunucuda ffmpeg KURULU olmalı.</summary>
     public string FfmpegPath { get; set; } = "ffmpeg";
+
+    /// <summary>Kategori görsel şablonlarının kök klasörü (alt klasörler: 1x1, reels). Media:StoragePath
+    /// gibi düşün — ÜRETİMDE Api+Worker'ın erişebileceği ORTAK bir yol olmalı (ör. C:\\Datas\\assets\\cards).
+    /// Boş/göreli ise uygulama klasörüne / çalışma diznine göre çözülür (dev'de wwwroot/assets/cards bulunur).</summary>
+    public string CardAssetsPath { get; set; } = "wwwroot/assets/cards";
 }

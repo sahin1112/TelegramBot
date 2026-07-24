@@ -98,7 +98,9 @@ internal sealed class InstagramPublisher(
             var storyOn = !string.Equals(await settings.GetAsync("instagram.story_enabled", ct), "false", StringComparison.OrdinalIgnoreCase);
             if (storyOn)
             {
-                var storyVideoUrl = request.VideoUrl; var storyImageUrl = imageUrl;
+                // Hikaye 9:16 olmalı: ayrı story görseli (StoryImageUrl) varsa onu (JPEG) kullan; yoksa 1:1'e düş.
+                var storyImageUrl = IsPublicHttpUrl(request.StoryImageUrl) ? ToJpegUrl(request.StoryImageUrl!) : imageUrl;
+                var storyVideoUrl = request.VideoUrl;
                 _ = Task.Run(async () =>
                 {
                     try { await PublishStoryAsync(client, userId, token, hasVideo, storyVideoUrl, storyImageUrl, CancellationToken.None); }
